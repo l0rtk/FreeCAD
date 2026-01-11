@@ -28,30 +28,34 @@ class ChatListWidget(QtWidgets.QScrollArea):
 
         self.setStyleSheet("""
             QScrollArea {
-                background-color: #1a1a1a;
+                background-color: #0d1117;
                 border: none;
             }
             QScrollBar:vertical {
-                background-color: #1a1a1a;
-                width: 8px;
-                border-radius: 4px;
+                background-color: #0d1117;
+                width: 10px;
+                border-radius: 5px;
+                margin: 4px 2px;
             }
             QScrollBar::handle:vertical {
-                background-color: #3a3a3a;
-                border-radius: 4px;
-                min-height: 30px;
+                background-color: #30363d;
+                border-radius: 5px;
+                min-height: 40px;
             }
             QScrollBar::handle:vertical:hover {
-                background-color: #4a4a4a;
+                background-color: #484f58;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
             }
         """)
 
         # Container widget
         self._container = QtWidgets.QWidget()
-        self._container.setStyleSheet("background-color: #1a1a1a;")
+        self._container.setStyleSheet("background-color: #0d1117;")
         self._layout = QtWidgets.QVBoxLayout(self._container)
         self._layout.setContentsMargins(8, 8, 8, 8)
         self._layout.setSpacing(8)
@@ -235,70 +239,80 @@ class ChatWidget(QtWidgets.QWidget):
         input_container = QtWidgets.QWidget()
         input_container.setStyleSheet("""
             QWidget {
-                background-color: #252525;
-                border-top: 1px solid #333;
+                background-color: #161b22;
+                border-top: 1px solid #30363d;
             }
         """)
         input_layout = QtWidgets.QVBoxLayout(input_container)
-        input_layout.setContentsMargins(12, 8, 12, 12)
-        input_layout.setSpacing(8)
+        input_layout.setContentsMargins(16, 12, 16, 16)
+        input_layout.setSpacing(10)
 
-        # Input row
-        input_row = QtWidgets.QHBoxLayout()
-        input_row.setSpacing(8)
+        # Input frame with border
+        input_frame = QtWidgets.QFrame()
+        input_frame.setStyleSheet("""
+            QFrame {
+                background-color: #0d1117;
+                border: 1px solid #30363d;
+                border-radius: 12px;
+            }
+            QFrame:focus-within {
+                border-color: #58a6ff;
+            }
+        """)
+        input_frame_layout = QtWidgets.QHBoxLayout(input_frame)
+        input_frame_layout.setContentsMargins(12, 8, 8, 8)
+        input_frame_layout.setSpacing(8)
 
         # Text input
         self._input = QtWidgets.QTextEdit()
         self._input.setPlaceholderText("Describe what you want to build...")
-        self._input.setFixedHeight(60)
+        self._input.setMinimumHeight(44)
+        self._input.setMaximumHeight(120)
         self._input.setStyleSheet("""
             QTextEdit {
-                background-color: #1a1a1a;
-                color: #e0e0e0;
-                border: 1px solid #333;
-                border-radius: 8px;
-                padding: 8px 12px;
-                font-size: 13px;
-            }
-            QTextEdit:focus {
-                border-color: #4a9eff;
+                background-color: transparent;
+                color: #c9d1d9;
+                border: none;
+                font-size: 14px;
+                padding: 4px 0;
             }
         """)
         self._input.installEventFilter(self)
-        input_row.addWidget(self._input, stretch=1)
+        input_frame_layout.addWidget(self._input, stretch=1)
 
         # Send button
         self._send_btn = QtWidgets.QPushButton("Send")
-        self._send_btn.setFixedSize(70, 36)
+        self._send_btn.setFixedSize(72, 36)
         self._send_btn.setCursor(QtCore.Qt.PointingHandCursor)
         self._send_btn.setStyleSheet("""
             QPushButton {
-                background-color: #4a9eff;
-                color: white;
+                background-color: #238636;
+                color: #ffffff;
                 border: none;
                 border-radius: 8px;
-                font-weight: bold;
+                font-weight: 600;
                 font-size: 13px;
             }
             QPushButton:hover {
-                background-color: #3a8eef;
+                background-color: #2ea043;
             }
             QPushButton:pressed {
-                background-color: #2a7edf;
+                background-color: #238636;
             }
             QPushButton:disabled {
-                background-color: #3a3a3a;
-                color: #666;
+                background-color: #21262d;
+                color: #484f58;
             }
         """)
         self._send_btn.clicked.connect(self._on_send)
-        input_row.addWidget(self._send_btn, alignment=QtCore.Qt.AlignBottom)
+        input_frame_layout.addWidget(self._send_btn, alignment=QtCore.Qt.AlignBottom)
 
-        input_layout.addLayout(input_row)
+        input_layout.addWidget(input_frame)
 
         # Hint text
-        hint = QtWidgets.QLabel("Press Enter to send, Shift+Enter for new line")
-        hint.setStyleSheet("color: #666; font-size: 11px;")
+        hint = QtWidgets.QLabel("Enter to send  ·  Shift+Enter for new line")
+        hint.setStyleSheet("color: #484f58; font-size: 11px; background: transparent;")
+        hint.setAlignment(QtCore.Qt.AlignCenter)
         input_layout.addWidget(hint)
 
         layout.addWidget(input_container)

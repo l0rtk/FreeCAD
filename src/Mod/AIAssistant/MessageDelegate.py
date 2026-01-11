@@ -10,36 +10,70 @@ from .CodeBlockWidget import CodeBlockWidget
 import re
 
 
+class AvatarWidget(QtWidgets.QLabel):
+    """Circular avatar with initials."""
+
+    def __init__(self, text: str, bg_color: str, text_color: str, parent=None):
+        super().__init__(text, parent)
+        self.setFixedSize(28, 28)
+        self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setStyleSheet(f"""
+            QLabel {{
+                background-color: {bg_color};
+                color: {text_color};
+                border-radius: 14px;
+                font-weight: bold;
+                font-size: 11px;
+            }}
+        """)
+
+
 class MessageBubbleWidget(QtWidgets.QFrame):
     """Widget representing a single message bubble."""
 
     runCodeRequested = QtCore.Signal(str)
 
-    # Colors
+    # Colors - more vibrant and Cursor-like
     COLORS = {
         MessageRole.USER: {
-            "bg": "#2a4a7a",
-            "text": "#ffffff",
-            "name": "#7eb3ff",
-            "name_text": "You"
+            "bg": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #2d3748, stop:1 #1a202c)",
+            "bg_solid": "#2d3748",
+            "text": "#e2e8f0",
+            "name": "#a0aec0",
+            "name_text": "You",
+            "avatar_bg": "#4a5568",
+            "avatar_text": "#fff",
+            "avatar_icon": "U"
         },
         MessageRole.ASSISTANT: {
-            "bg": "#2d2d2d",
-            "text": "#e0e0e0",
-            "name": "#98c379",
-            "name_text": "AI"
+            "bg": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #374151, stop:1 #1f2937)",
+            "bg_solid": "#374151",
+            "text": "#f3f4f6",
+            "name": "#10b981",
+            "name_text": "AI",
+            "avatar_bg": "#10b981",
+            "avatar_text": "#fff",
+            "avatar_icon": "AI"
         },
         MessageRole.SYSTEM: {
-            "bg": "#1a1a2e",
-            "text": "#888888",
-            "name": "#636d83",
-            "name_text": "System"
+            "bg": "transparent",
+            "bg_solid": "transparent",
+            "text": "#9ca3af",
+            "name": "#6b7280",
+            "name_text": "",
+            "avatar_bg": "#4b5563",
+            "avatar_text": "#fff",
+            "avatar_icon": "S"
         },
         MessageRole.ERROR: {
-            "bg": "#3d1f1f",
-            "text": "#ff6b6b",
-            "name": "#e06c75",
-            "name_text": "Error"
+            "bg": "qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #7f1d1d, stop:1 #450a0a)",
+            "bg_solid": "#7f1d1d",
+            "text": "#fca5a5",
+            "name": "#f87171",
+            "name_text": "Error",
+            "avatar_bg": "#dc2626",
+            "avatar_text": "#fff",
+            "avatar_icon": "!"
         }
     }
 
@@ -54,32 +88,71 @@ class MessageBubbleWidget(QtWidgets.QFrame):
         role = self._message.role
         colors = self.COLORS.get(role, self.COLORS[MessageRole.ASSISTANT])
 
-        # Container styling
-        self.setStyleSheet(f"""
-            MessageBubbleWidget {{
-                background-color: {colors['bg']};
-                border-radius: 12px;
-                margin: 4px 8px;
+        # Main horizontal layout: avatar + content
+        main_layout = QtWidgets.QHBoxLayout(self)
+        main_layout.setContentsMargins(8, 6, 8, 6)
+        main_layout.setSpacing(10)
+
+        # For system messages, center and simplify
+        if role == MessageRole.SYSTEM:
+            main_layout.setAlignment(QtCore.Qt.AlignCenter)
+            label = QtWidgets.QLabel(self._message.text)
+            label.setStyleSheet(f"""
+                QLabel {{
+                    color: {colors['text']};
+                    font-size: 12px;
+                    font-style: italic;
+                    padding: 8px 16px;
+                    background-color: rgba(75, 85, 99, 0.3);
+                    border-radius: 12px;
+                }}
+            """)
+            main_layout.addWidget(label)
+            return
+
+        # Avatar
+        avatar = AvatarWidget(
+            colors['avatar_icon'],
+            colors['avatar_bg'],
+            colors['avatar_text']
+        )
+        main_layout.addWidget(avatar, alignment=QtCore.Qt.AlignTop)
+
+        # Content container
+        content_frame = QtWidgets.QFrame()
+        content_frame.setStyleSheet(f"""
+            QFrame {{
+                background: {colors['bg']};
+                border-radius: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
             }}
         """)
 
-        layout = QtWidgets.QVBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 10)
-        layout.setSpacing(6)
+        content_layout = QtWidgets.QVBoxLayout(content_frame)
+        content_layout.setContentsMargins(14, 10, 14, 12)
+        content_layout.setSpacing(8)
 
-        # Role label (name)
-        name_label = QtWidgets.QLabel(colors['name_text'])
-        name_label.setStyleSheet(f"""
-            QLabel {{
-                color: {colors['name']};
-                font-weight: bold;
-                font-size: 12px;
-            }}
-        """)
-        layout.addWidget(name_label)
+        # Role label (name) - only if not empty
+        if colors['name_text']:
+            name_label = QtWidgets.QLabel(colors['name_text'])
+            name_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {colors['name']};
+                    font-weight: 600;
+                    font-size: 12px;
+                    background: transparent;
+                    border: none;
+                }}
+            """)
+            content_layout.addWidget(name_label)
 
         # Parse and display content
-        self._render_content(layout, colors)
+        self._render_content(content_layout, colors)
+
+        main_layout.addWidget(content_frame, stretch=1)
+
+        # Add spacer on the right for user messages to push content left
+        # (or we could right-align user messages, but keeping consistent for now)
 
     def _render_content(self, layout: QtWidgets.QVBoxLayout, colors: dict):
         """Render message content with code blocks."""
@@ -109,7 +182,9 @@ class MessageBubbleWidget(QtWidgets.QFrame):
                     QLabel {{
                         color: {colors['text']};
                         font-size: 13px;
-                        line-height: 1.4;
+                        line-height: 1.5;
+                        background: transparent;
+                        border: none;
                     }}
                 """)
                 layout.addWidget(label)
@@ -169,21 +244,70 @@ class MessageBubbleWidget(QtWidgets.QFrame):
             if item.widget():
                 item.widget().deleteLater()
 
-        colors = self.COLORS.get(self._message.role, self.COLORS[MessageRole.ASSISTANT])
+        # Re-setup UI
+        self._code_widgets = []
+        self._setup_ui_content()
 
-        # Re-add name label
-        name_label = QtWidgets.QLabel(colors['name_text'])
-        name_label.setStyleSheet(f"""
-            QLabel {{
-                color: {colors['name']};
-                font-weight: bold;
-                font-size: 12px;
+    def _setup_ui_content(self):
+        """Rebuild just the content part."""
+        role = self._message.role
+        colors = self.COLORS.get(role, self.COLORS[MessageRole.ASSISTANT])
+
+        main_layout = self.layout()
+
+        if role == MessageRole.SYSTEM:
+            main_layout.setAlignment(QtCore.Qt.AlignCenter)
+            label = QtWidgets.QLabel(self._message.displayed_text or self._message.text)
+            label.setStyleSheet(f"""
+                QLabel {{
+                    color: {colors['text']};
+                    font-size: 12px;
+                    font-style: italic;
+                    padding: 8px 16px;
+                    background-color: rgba(75, 85, 99, 0.3);
+                    border-radius: 12px;
+                }}
+            """)
+            main_layout.addWidget(label)
+            return
+
+        # Avatar
+        avatar = AvatarWidget(
+            colors['avatar_icon'],
+            colors['avatar_bg'],
+            colors['avatar_text']
+        )
+        main_layout.addWidget(avatar, alignment=QtCore.Qt.AlignTop)
+
+        # Content container
+        content_frame = QtWidgets.QFrame()
+        content_frame.setStyleSheet(f"""
+            QFrame {{
+                background: {colors['bg']};
+                border-radius: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
             }}
         """)
-        layout.addWidget(name_label)
 
-        self._code_widgets = []
-        self._render_content(layout, colors)
+        content_layout = QtWidgets.QVBoxLayout(content_frame)
+        content_layout.setContentsMargins(14, 10, 14, 12)
+        content_layout.setSpacing(8)
+
+        if colors['name_text']:
+            name_label = QtWidgets.QLabel(colors['name_text'])
+            name_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {colors['name']};
+                    font-weight: 600;
+                    font-size: 12px;
+                    background: transparent;
+                    border: none;
+                }}
+            """)
+            content_layout.addWidget(name_label)
+
+        self._render_content(content_layout, colors)
+        main_layout.addWidget(content_frame, stretch=1)
 
 
 class TypingIndicatorWidget(QtWidgets.QFrame):
@@ -199,55 +323,53 @@ class TypingIndicatorWidget(QtWidgets.QFrame):
 
     def _setup_ui(self):
         """Build the indicator UI."""
-        self.setStyleSheet("""
-            TypingIndicatorWidget {
-                background-color: #2d2d2d;
-                border-radius: 12px;
-                margin: 4px 8px;
+        main_layout = QtWidgets.QHBoxLayout(self)
+        main_layout.setContentsMargins(8, 6, 8, 6)
+        main_layout.setSpacing(10)
+
+        # Avatar
+        avatar = AvatarWidget("AI", "#10b981", "#fff")
+        main_layout.addWidget(avatar, alignment=QtCore.Qt.AlignTop)
+
+        # Bubble
+        bubble = QtWidgets.QFrame()
+        bubble.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #374151, stop:1 #1f2937);
+                border-radius: 16px;
+                border: 1px solid rgba(255, 255, 255, 0.1);
             }
         """)
 
-        layout = QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(6)
-
-        # AI label
-        ai_label = QtWidgets.QLabel("AI")
-        ai_label.setStyleSheet("""
-            QLabel {
-                color: #98c379;
-                font-weight: bold;
-                font-size: 12px;
-            }
-        """)
-        layout.addWidget(ai_label)
-
-        layout.addSpacing(8)
+        bubble_layout = QtWidgets.QHBoxLayout(bubble)
+        bubble_layout.setContentsMargins(16, 14, 16, 14)
+        bubble_layout.setSpacing(4)
 
         # Three dots
         self._dots = []
         for i in range(3):
             dot = QtWidgets.QLabel("●")
-            dot.setStyleSheet("color: #636d83; font-size: 10px;")
+            dot.setStyleSheet("color: #6b7280; font-size: 14px; background: transparent;")
             self._dots.append(dot)
-            layout.addWidget(dot)
+            bubble_layout.addWidget(dot)
 
-        layout.addStretch()
+        main_layout.addWidget(bubble)
+        main_layout.addStretch()
 
     def start(self):
         """Start the animation."""
-        self._timer.start(300)
+        self._timer.start(400)
 
     def stop(self):
         """Stop the animation."""
         self._timer.stop()
 
     def _animate(self):
-        """Animate the dots."""
+        """Animate the dots with bounce effect."""
         for i, dot in enumerate(self._dots):
             if i == self._dot_index:
-                dot.setStyleSheet("color: #98c379; font-size: 10px;")
+                dot.setStyleSheet("color: #10b981; font-size: 14px; background: transparent;")
             else:
-                dot.setStyleSheet("color: #636d83; font-size: 10px;")
+                dot.setStyleSheet("color: #6b7280; font-size: 14px; background: transparent;")
 
         self._dot_index = (self._dot_index + 1) % 3
