@@ -2,7 +2,7 @@
 
 # AIAssistant Module - Natural language CAD modeling assistant
 
-set(AIAssistant_SRCS
+SET(AIAssistant_SRCS
     Init.py
     InitGui.py
     __init__.py
@@ -12,25 +12,15 @@ set(AIAssistant_SRCS
     CodeExecutor.py
 )
 
-add_custom_target(AIAssistant ALL
+SOURCE_GROUP("" FILES ${AIAssistant_SRCS})
+
+ADD_CUSTOM_TARGET(AIAssistant ALL
     SOURCES ${AIAssistant_SRCS}
 )
 
-fc_target_copy_resource(AIAssistant
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_BINARY_DIR}/Mod/AIAssistant
-    ${AIAssistant_SRCS}
-)
+fc_copy_sources(AIAssistant "${CMAKE_BINARY_DIR}/Mod/AIAssistant" ${AIAssistant_SRCS})
 
-install(
+INSTALL(
     FILES ${AIAssistant_SRCS}
     DESTINATION Mod/AIAssistant
 )
-
-# Install resources if they exist
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/Resources)
-    install(
-        DIRECTORY Resources
-        DESTINATION Mod/AIAssistant
-    )
-endif()

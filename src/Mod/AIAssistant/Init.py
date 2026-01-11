@@ -6,4 +6,4 @@ This runs when FreeCAD starts, even in console mode.
 
 import FreeCAD
 
-FreeCAD.Console.PrintLog("AIAssistant module initialized\n")
+FreeCAD.Console.PrintMessage("AIAssistant module initialized\n")
