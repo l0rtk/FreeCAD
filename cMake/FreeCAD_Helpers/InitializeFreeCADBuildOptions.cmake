@@ -98,6 +98,7 @@ macro(InitializeFreeCADBuildOptions)
         set(CMAKE_MACOSX_RPATH TRUE )
     endif(APPLE)
 
+    option(BUILD_AIASSISTANT "Build the FreeCAD AI Assistant module" ON)
     option(BUILD_FEM "Build the FreeCAD FEM module" ON)
     option(BUILD_SANDBOX "Build the FreeCAD Sandbox module which is only for testing purposes" OFF)
     option(BUILD_TEMPLATE "Build the FreeCAD template module which is only for testing purposes" OFF)
