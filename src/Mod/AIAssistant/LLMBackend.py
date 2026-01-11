@@ -142,6 +142,18 @@ User: "Simple office building 24x16m, 4m height"
 → Slabs: 265mm hollow core
 → Walls: 150mm panels
 
+## WORKING WITH EXISTING DOCUMENTS
+
+When CURRENT DOCUMENT STATE is provided:
+1. ANALYZE existing objects before generating code
+2. DO NOT recreate existing elements - add to them or modify as requested
+3. Match existing grid spacing and element sizes for consistency
+4. Use existing column positions when adding beams or slabs
+5. Reference existing objects by their Label when needed
+6. Use doc = FreeCAD.ActiveDocument (don't create new document)
+
+Example: If document has columns at 6m grid, add beams spanning between them at the same grid.
+
 Remember: Output ONLY the Python code. Apply structural rules automatically."""
 
 
