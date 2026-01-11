@@ -10,6 +10,11 @@ SET(AIAssistant_SRCS
     LLMBackend.py
     ContextBuilder.py
     CodeExecutor.py
+    ChatWidget.py
+    MessageModel.py
+    MessageDelegate.py
+    CodeBlockWidget.py
+    SyntaxHighlighter.py
 )
 
 SOURCE_GROUP("" FILES ${AIAssistant_SRCS})

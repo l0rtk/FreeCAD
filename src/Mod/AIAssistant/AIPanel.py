@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """
 AI Assistant Panel - Main dock widget for natural language CAD modeling.
+Features a modern Cursor-like chat interface.
 """
 
 import FreeCAD
@@ -10,10 +11,31 @@ from PySide6 import QtWidgets, QtCore, QtGui
 from . import LLMBackend
 from . import ContextBuilder
 from . import CodeExecutor
+from .ChatWidget import ChatWidget
+
+
+class LLMWorker(QtCore.QThread):
+    """Background worker for LLM API calls."""
+    finished = QtCore.Signal(str)
+    error = QtCore.Signal(str)
+
+    def __init__(self, llm, user_input, context, conversation):
+        super().__init__()
+        self.llm = llm
+        self.user_input = user_input
+        self.context = context
+        self.conversation = conversation
+
+    def run(self):
+        try:
+            response = self.llm.chat(self.user_input, self.context, self.conversation)
+            self.finished.emit(response)
+        except Exception as e:
+            self.error.emit(str(e))
 
 
 class AIAssistantDockWidget(QtWidgets.QDockWidget):
-    """Main AI Assistant dock widget."""
+    """Main AI Assistant dock widget with modern chat interface."""
 
     def __init__(self, parent=None):
         super().__init__("AI Assistant", parent)
@@ -23,7 +45,9 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         )
 
         self.llm = LLMBackend.LLMBackend()
-        self.conversation = []
+        self.worker = None
+        self.pending_input = None
+        self._last_code = ""
 
         self._setup_ui()
         self._connect_signals()
@@ -31,116 +55,114 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
     def _setup_ui(self):
         """Build the UI."""
         main = QtWidgets.QWidget()
+        main.setStyleSheet("background-color: #1a1a1a;")
         layout = QtWidgets.QVBoxLayout(main)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(6)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         # Header
-        header = QtWidgets.QHBoxLayout()
-        title = QtWidgets.QLabel("AI Assistant")
-        title.setStyleSheet("font-weight: bold; font-size: 13px;")
-        header.addWidget(title)
-        header.addStretch()
+        header = QtWidgets.QWidget()
+        header.setStyleSheet("""
+            QWidget {
+                background-color: #252525;
+                border-bottom: 1px solid #333;
+            }
+        """)
+        header.setFixedHeight(40)
+        header_layout = QtWidgets.QHBoxLayout(header)
+        header_layout.setContentsMargins(12, 0, 12, 0)
 
+        title = QtWidgets.QLabel("AI Assistant")
+        title.setStyleSheet("""
+            QLabel {
+                color: #e0e0e0;
+                font-weight: bold;
+                font-size: 14px;
+            }
+        """)
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+
+        # Settings button
         self.settings_btn = QtWidgets.QToolButton()
         self.settings_btn.setText("...")
         self.settings_btn.setToolTip("Settings")
         self.settings_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        self._setup_settings_menu()
-        header.addWidget(self.settings_btn)
-        layout.addLayout(header)
-
-        # Chat display
-        self.chat_display = QtWidgets.QTextEdit()
-        self.chat_display.setReadOnly(True)
-        self.chat_display.setMinimumHeight(150)
-        self.chat_display.setStyleSheet("""
-            QTextEdit {
-                background-color: #1e1e1e;
-                color: #d4d4d4;
-                border: 1px solid #3c3c3c;
-                border-radius: 4px;
-                font-family: sans-serif;
-                font-size: 12px;
-            }
-        """)
-        layout.addWidget(self.chat_display, stretch=2)
-
-        # Code preview
-        code_header = QtWidgets.QHBoxLayout()
-        code_header.addWidget(QtWidgets.QLabel("Generated Code:"))
-        self.copy_btn = QtWidgets.QPushButton("Copy")
-        self.copy_btn.setMaximumWidth(60)
-        self.copy_btn.clicked.connect(self._copy_code)
-        code_header.addWidget(self.copy_btn)
-        layout.addLayout(code_header)
-
-        self.code_display = QtWidgets.QPlainTextEdit()
-        self.code_display.setMinimumHeight(80)
-        self.code_display.setStyleSheet("""
-            QPlainTextEdit {
-                font-family: monospace;
-                font-size: 11px;
-                background-color: #2d2d2d;
-                color: #9cdcfe;
-                border: 1px solid #3c3c3c;
-                border-radius: 4px;
-            }
-        """)
-        layout.addWidget(self.code_display, stretch=1)
-
-        # Input area
-        input_label = QtWidgets.QLabel("What do you want to build?")
-        layout.addWidget(input_label)
-
-        self.input_field = QtWidgets.QLineEdit()
-        self.input_field.setPlaceholderText("e.g., Create a box with a hole in the center...")
-        self.input_field.setStyleSheet("padding: 6px;")
-        layout.addWidget(self.input_field)
-
-        # Buttons
-        btn_layout = QtWidgets.QHBoxLayout()
-
-        self.send_btn = QtWidgets.QPushButton("Send")
-        self.send_btn.setStyleSheet("padding: 6px 16px;")
-        btn_layout.addWidget(self.send_btn)
-
-        self.run_btn = QtWidgets.QPushButton("Run Code")
-        self.run_btn.setEnabled(False)
-        self.run_btn.setStyleSheet("""
-            QPushButton {
-                padding: 6px 16px;
-                background-color: #4CAF50;
-                color: white;
+        self.settings_btn.setStyleSheet("""
+            QToolButton {
+                color: #888;
+                background: transparent;
                 border: none;
+                font-size: 16px;
+                padding: 4px 8px;
+            }
+            QToolButton:hover {
+                color: #e0e0e0;
+                background-color: #333;
                 border-radius: 4px;
             }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
-            QPushButton:hover:!disabled {
-                background-color: #45a049;
+            QToolButton::menu-indicator {
+                image: none;
             }
         """)
-        btn_layout.addWidget(self.run_btn)
+        self._setup_settings_menu()
+        header_layout.addWidget(self.settings_btn)
 
-        self.clear_btn = QtWidgets.QPushButton("Clear")
-        self.clear_btn.setStyleSheet("padding: 6px 12px;")
-        btn_layout.addWidget(self.clear_btn)
+        # Clear button
+        clear_btn = QtWidgets.QToolButton()
+        clear_btn.setText("Clear")
+        clear_btn.setToolTip("Clear chat")
+        clear_btn.setStyleSheet("""
+            QToolButton {
+                color: #888;
+                background: transparent;
+                border: none;
+                font-size: 12px;
+                padding: 4px 8px;
+            }
+            QToolButton:hover {
+                color: #e0e0e0;
+                background-color: #333;
+                border-radius: 4px;
+            }
+        """)
+        clear_btn.clicked.connect(self._on_clear)
+        header_layout.addWidget(clear_btn)
 
-        layout.addLayout(btn_layout)
+        layout.addWidget(header)
 
-        # Status bar
-        self.status = QtWidgets.QLabel("Ready")
-        self.status.setStyleSheet("color: palette(mid); font-size: 11px;")
-        layout.addWidget(self.status)
+        # Chat widget
+        self._chat = ChatWidget()
+        layout.addWidget(self._chat, stretch=1)
 
         self.setWidget(main)
-        self.setMinimumWidth(320)
+        self.setMinimumWidth(380)
+        self.setMinimumHeight(500)
 
     def _setup_settings_menu(self):
         """Setup the settings dropdown menu."""
         menu = QtWidgets.QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2d2d2d;
+                color: #e0e0e0;
+                border: 1px solid #444;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #3d3d3d;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #444;
+                margin: 4px 8px;
+            }
+        """)
 
         self.context_action = menu.addAction("Include document context")
         self.context_action.setCheckable(True)
@@ -149,6 +171,10 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self.autorun_action = menu.addAction("Auto-run code")
         self.autorun_action.setCheckable(True)
         self.autorun_action.setChecked(False)
+
+        self.streaming_action = menu.addAction("Streaming animation")
+        self.streaming_action.setCheckable(True)
+        self.streaming_action.setChecked(True)
 
         menu.addSeparator()
 
@@ -159,124 +185,83 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
 
     def _connect_signals(self):
         """Connect UI signals."""
-        self.input_field.returnPressed.connect(self._on_send)
-        self.send_btn.clicked.connect(self._on_send)
-        self.run_btn.clicked.connect(self._on_run)
-        self.clear_btn.clicked.connect(self._on_clear)
+        self._chat.messageSubmitted.connect(self._on_send)
+        self._chat.runCodeRequested.connect(self._on_run_code)
 
-    def _append_message(self, role: str, content: str, is_code: bool = False):
-        """Append a message to the chat display."""
-        if role == "You":
-            color = "#61afef"  # Blue
-        elif role == "AI":
-            color = "#98c379"  # Green
-        elif role == "Error":
-            color = "#e06c75"  # Red
-        else:
-            color = "#abb2bf"  # Gray for System
-
-        self.chat_display.append(
-            f'<span style="color: {color}; font-weight: bold;">{role}:</span>'
-        )
-        if is_code:
-            preview = content[:100] + "..." if len(content) > 100 else content
-            escaped = preview.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            self.chat_display.append(
-                f'<pre style="margin: 2px 0 8px 0; color: #abb2bf;">{escaped}</pre>'
-            )
-        else:
-            self.chat_display.append(
-                f'<p style="margin: 2px 0 8px 0; color: #d4d4d4;">{content}</p>'
-            )
-
-        # Scroll to bottom
-        scrollbar = self.chat_display.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
-
-    def _on_send(self):
-        """Handle send button click."""
-        user_input = self.input_field.text().strip()
+    def _on_send(self, user_input: str):
+        """Handle message submission."""
         if not user_input:
             return
 
-        self.input_field.clear()
-        self._append_message("You", user_input)
+        # Prevent double-send
+        if self.worker and self.worker.isRunning():
+            return
 
-        # Update UI state
-        self.status.setText("Thinking...")
-        self.send_btn.setEnabled(False)
-        QtWidgets.QApplication.processEvents()
+        self.pending_input = user_input
+
+        # Show typing indicator
+        self._chat.show_typing()
+        self._chat.set_input_enabled(False)
 
         # Build context if enabled
         context = ""
         if self.context_action.isChecked():
             context = ContextBuilder.build_context()
 
-        # Call LLM
-        response = self.llm.chat(user_input, context, self.conversation)
+        # Get conversation history
+        conversation = self._chat.get_conversation_history()
 
-        # Update conversation history
-        self.conversation.append({"role": "user", "content": user_input})
-        self.conversation.append({"role": "assistant", "content": response})
+        # Start background worker
+        self.worker = LLMWorker(self.llm, user_input, context, conversation)
+        self.worker.finished.connect(self._on_response)
+        self.worker.error.connect(self._on_error)
+        self.worker.start()
 
-        # Keep only last 10 exchanges
-        if len(self.conversation) > 20:
-            self.conversation = self.conversation[-20:]
+    def _on_response(self, response: str):
+        """Handle successful LLM response."""
+        # Hide typing indicator
+        self._chat.hide_typing()
+        self._chat.set_input_enabled(True)
 
-        # Display response
-        self._append_message("AI", response, is_code=True)
-        self.code_display.setPlainText(response)
-        self.run_btn.setEnabled(True)
-        self.send_btn.setEnabled(True)
-        self.status.setText("Code ready - review and click Run")
+        # Store the code for later execution
+        self._last_code = response
+
+        # Display response with or without streaming
+        use_streaming = self.streaming_action.isChecked()
+        self._chat.add_assistant_message(response, stream=use_streaming)
+
+        self.pending_input = None
 
         # Auto-run if enabled
         if self.autorun_action.isChecked():
-            self._on_run()
+            # Delay to let streaming complete
+            QtCore.QTimer.singleShot(500, lambda: self._on_run_code(response))
 
-    def _on_run(self):
-        """Execute the generated code."""
-        code = self.code_display.toPlainText()
+    def _on_error(self, error_msg: str):
+        """Handle LLM error."""
+        self._chat.hide_typing()
+        self._chat.set_input_enabled(True)
+        self._chat.add_error_message(error_msg)
+        self.pending_input = None
+
+    def _on_run_code(self, code: str):
+        """Execute the provided code."""
         if not code.strip():
             return
-
-        self.status.setText("Executing...")
-        QtWidgets.QApplication.processEvents()
 
         success, message = CodeExecutor.execute(code)
 
         if success:
-            self.status.setText("Executed successfully")
-            self.status.setStyleSheet("color: #4CAF50; font-size: 11px;")
-            self._append_message("System", "Code executed successfully")
+            self._chat.add_system_message("Code executed successfully")
         else:
-            self.status.setText(f"Error: {message[:50]}")
-            self.status.setStyleSheet("color: #f44336; font-size: 11px;")
-            self._append_message("Error", message)
-
-        # Reset status color after delay
-        QtCore.QTimer.singleShot(3000, self._reset_status_style)
-
-    def _reset_status_style(self):
-        self.status.setStyleSheet("color: palette(mid); font-size: 11px;")
+            self._chat.add_error_message(f"Execution error: {message}")
 
     def _on_clear(self):
-        """Clear the UI."""
-        self.chat_display.clear()
-        self.code_display.clear()
-        self.run_btn.setEnabled(False)
-        self.status.setText("Ready")
-        self._reset_status_style()
+        """Clear the chat UI."""
+        self._chat.clear_chat()
+        self._last_code = ""
 
     def _clear_conversation(self):
         """Clear conversation history."""
-        self.conversation = []
         self._on_clear()
-        self.status.setText("Conversation cleared")
-
-    def _copy_code(self):
-        """Copy code to clipboard."""
-        code = self.code_display.toPlainText()
-        if code:
-            QtWidgets.QApplication.clipboard().setText(code)
-            self.status.setText("Code copied to clipboard")
+        self._chat.add_system_message("Conversation cleared")
