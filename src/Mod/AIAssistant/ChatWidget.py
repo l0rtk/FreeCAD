@@ -410,6 +410,9 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _on_streaming_complete(self):
         """Handle streaming completion."""
+        import FreeCAD
+        FreeCAD.Console.PrintMessage(f"AIAssistant: Streaming complete, row={self._streaming_row}, pending_debug={self._pending_debug_info is not None}\n")
+
         if self._streaming_row >= 0:
             message = self._chat_list._model.get_message(self._streaming_row)
             if message:
@@ -420,10 +423,16 @@ class ChatWidget(QtWidgets.QWidget):
                 )
 
             # Add debug info widget if pending
-            if self._pending_debug_info and self._streaming_row < len(self._chat_list._message_widgets):
+            widget_count = len(self._chat_list._message_widgets)
+            FreeCAD.Console.PrintMessage(f"AIAssistant: Checking debug - row={self._streaming_row}, widgets={widget_count}, has_debug={self._pending_debug_info is not None}\n")
+
+            if self._pending_debug_info and self._streaming_row < widget_count:
                 widget = self._chat_list._message_widgets[self._streaming_row]
+                FreeCAD.Console.PrintMessage("AIAssistant: Adding debug info widget\n")
                 widget.add_debug_info(self._pending_debug_info)
                 self._pending_debug_info = None
+            elif self._pending_debug_info:
+                FreeCAD.Console.PrintWarning(f"AIAssistant: Could not add debug info - row {self._streaming_row} >= widget count {widget_count}\n")
 
         self._streaming_row = -1
 

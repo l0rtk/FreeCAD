@@ -399,16 +399,22 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         # Build debug info if debug mode enabled
         debug_info = None
         if self.debug_action.isChecked():
+            FreeCAD.Console.PrintMessage("AIAssistant: Debug mode ON - building debug info\n")
             debug_info = {
                 "duration_ms": self.llm.last_duration_ms,
                 "model": self.llm.model,
                 "context_length": len(self.llm.last_context),
                 "system_prompt": self.llm.last_system_prompt,
                 "context": self.llm.last_context,
+                "conversation_history": self.llm.last_conversation,
+                "user_message": self.pending_input or "",
             }
+        else:
+            FreeCAD.Console.PrintMessage("AIAssistant: Debug mode OFF\n")
 
         # Display response with or without streaming
         use_streaming = self.streaming_action.isChecked()
+        FreeCAD.Console.PrintMessage(f"AIAssistant: Adding message with streaming={use_streaming}, debug_info={debug_info is not None}\n")
         self._chat.add_assistant_message(response, stream=use_streaming, debug_info=debug_info)
 
         self.pending_input = None

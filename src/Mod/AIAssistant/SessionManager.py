@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """
 Session Manager - Persists chat sessions and debug data to local JSON files.
+Sessions are stored at project level (next to the FreeCAD document).
 """
 
 import json
@@ -13,9 +14,22 @@ from typing import List, Optional, Dict, Any
 import FreeCAD
 
 
-def get_sessions_dir() -> Path:
-    """Get the sessions directory, creating it if needed."""
-    # Use FreeCAD's user config directory
+def get_project_sessions_dir() -> Optional[Path]:
+    """Get sessions directory next to the active document, if saved."""
+    try:
+        doc = FreeCAD.ActiveDocument
+        if doc and doc.FileName:
+            doc_path = Path(doc.FileName)
+            sessions_dir = doc_path.parent / ".freecad_ai" / "sessions"
+            sessions_dir.mkdir(parents=True, exist_ok=True)
+            return sessions_dir
+    except Exception:
+        pass
+    return None
+
+
+def get_global_sessions_dir() -> Path:
+    """Get the global sessions directory (fallback)."""
     config_dir = Path(FreeCAD.getUserAppDataDir())
     sessions_dir = config_dir / "AIAssistant" / "sessions"
     sessions_dir.mkdir(parents=True, exist_ok=True)
@@ -23,7 +37,11 @@ def get_sessions_dir() -> Path:
 
 
 class SessionManager:
-    """Manages chat session persistence to JSON files."""
+    """Manages chat session persistence to JSON files.
+
+    Sessions are stored next to the FreeCAD document in .freecad_ai/sessions/.
+    Falls back to global location if document is not saved.
+    """
 
     def __init__(self, sessions_dir: str = None):
         """
@@ -31,12 +49,22 @@ class SessionManager:
 
         Args:
             sessions_dir: Optional custom directory for sessions.
-                         Defaults to ~/.config/FreeCAD/AIAssistant/sessions/
         """
-        self._sessions_dir = Path(sessions_dir) if sessions_dir else get_sessions_dir()
-        self._sessions_dir.mkdir(parents=True, exist_ok=True)
+        self._custom_dir = Path(sessions_dir) if sessions_dir else None
         self._current_session_id: Optional[str] = None
         self._current_session_data: Optional[dict] = None
+
+    @property
+    def _sessions_dir(self) -> Path:
+        """Get the appropriate sessions directory."""
+        if self._custom_dir:
+            self._custom_dir.mkdir(parents=True, exist_ok=True)
+            return self._custom_dir
+        # Try project-level first, fall back to global
+        project_dir = get_project_sessions_dir()
+        if project_dir:
+            return project_dir
+        return get_global_sessions_dir()
 
     def new_session(self, document_name: str = None) -> str:
         """

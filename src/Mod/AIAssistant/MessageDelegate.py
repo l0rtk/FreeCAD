@@ -34,7 +34,7 @@ class DebugInfoWidget(QtWidgets.QWidget):
     def __init__(self, debug_info: dict, parent=None):
         super().__init__(parent)
         self._debug_info = debug_info
-        self._expanded = False
+        self._expanded = True  # Start expanded
         self._setup_ui()
 
     def _setup_ui(self):
@@ -43,33 +43,34 @@ class DebugInfoWidget(QtWidgets.QWidget):
         layout.setSpacing(4)
 
         # Toggle button
-        self._toggle_btn = QtWidgets.QPushButton("▶ Debug Info")
+        self._toggle_btn = QtWidgets.QPushButton("▼ Debug Info")  # Start expanded
         self._toggle_btn.setFlat(True)
         self._toggle_btn.setCursor(QtCore.Qt.PointingHandCursor)
         self._toggle_btn.setStyleSheet("""
             QPushButton {
-                color: #6b7280;
+                color: #10b981;
                 font-size: 11px;
                 text-align: left;
                 padding: 4px 8px;
                 background: transparent;
                 border: none;
+                font-weight: bold;
             }
             QPushButton:hover {
-                color: #9ca3af;
+                color: #34d399;
             }
         """)
         self._toggle_btn.clicked.connect(self._toggle)
         layout.addWidget(self._toggle_btn)
 
-        # Content (hidden by default)
+        # Content (visible by default now)
         self._content = QtWidgets.QFrame()
-        self._content.setVisible(False)
+        self._content.setVisible(True)  # Start visible
         self._content.setStyleSheet("""
             QFrame {
-                background-color: rgba(0, 0, 0, 0.3);
+                background-color: rgba(16, 185, 129, 0.1);
                 border-radius: 8px;
-                border: 1px solid #30363d;
+                border: 1px solid #10b981;
             }
         """)
         content_layout = QtWidgets.QVBoxLayout(self._content)
@@ -80,12 +81,13 @@ class DebugInfoWidget(QtWidgets.QWidget):
         duration = self._debug_info.get('duration_ms', 0)
         model = self._debug_info.get('model', 'unknown')
         context_len = self._debug_info.get('context_length', 0)
+        history_len = len(self._debug_info.get('conversation_history', []))
 
-        stats_text = f"Duration: {duration:.0f}ms  |  Model: {model}  |  Context: {context_len} chars"
+        stats_text = f"Duration: {duration:.0f}ms  |  Model: {model}  |  Context: {context_len} chars  |  History: {history_len} msgs"
         stats_label = QtWidgets.QLabel(stats_text)
         stats_label.setStyleSheet("""
             QLabel {
-                color: #9ca3af;
+                color: #10b981;
                 font-size: 11px;
                 font-family: monospace;
                 background: transparent;
@@ -96,6 +98,13 @@ class DebugInfoWidget(QtWidgets.QWidget):
         # Buttons to show full data
         btn_layout = QtWidgets.QHBoxLayout()
         btn_layout.setSpacing(8)
+
+        # Full Request button - shows everything
+        full_btn = QtWidgets.QPushButton("Full Request")
+        full_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        full_btn.setStyleSheet(self._button_style_primary())
+        full_btn.clicked.connect(self._show_full_request)
+        btn_layout.addWidget(full_btn)
 
         prompt_btn = QtWidgets.QPushButton("System Prompt")
         prompt_btn.setCursor(QtCore.Qt.PointingHandCursor)
@@ -134,10 +143,80 @@ class DebugInfoWidget(QtWidgets.QWidget):
             }
         """
 
+    def _button_style_primary(self):
+        return """
+            QPushButton {
+                background-color: #10b981;
+                color: #ffffff;
+                border: none;
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #34d399;
+            }
+        """
+
     def _toggle(self):
         self._expanded = not self._expanded
         self._content.setVisible(self._expanded)
         self._toggle_btn.setText("▼ Debug Info" if self._expanded else "▶ Debug Info")
+
+    def _show_full_request(self):
+        """Show the complete request sent to the LLM."""
+        import json
+
+        # Build full request text
+        lines = []
+        lines.append("=" * 60)
+        lines.append("FULL LLM REQUEST")
+        lines.append("=" * 60)
+        lines.append("")
+
+        # Metadata
+        lines.append(f"Model: {self._debug_info.get('model', 'unknown')}")
+        lines.append(f"Duration: {self._debug_info.get('duration_ms', 0):.0f}ms")
+        lines.append(f"Context Length: {self._debug_info.get('context_length', 0)} chars")
+        lines.append("")
+
+        # User message
+        lines.append("-" * 60)
+        lines.append("USER MESSAGE:")
+        lines.append("-" * 60)
+        lines.append(self._debug_info.get('user_message', '(none)'))
+        lines.append("")
+
+        # Conversation history
+        history = self._debug_info.get('conversation_history', [])
+        if history:
+            lines.append("-" * 60)
+            lines.append(f"CONVERSATION HISTORY ({len(history)} messages):")
+            lines.append("-" * 60)
+            for i, msg in enumerate(history):
+                role = msg.get('role', 'unknown').upper()
+                content = msg.get('content', '')
+                lines.append(f"\n[{i+1}] {role}:")
+                lines.append(content[:500] + "..." if len(content) > 500 else content)
+            lines.append("")
+
+        # Document context (RAG)
+        context = self._debug_info.get('context', '')
+        lines.append("-" * 60)
+        lines.append("DOCUMENT CONTEXT (RAG):")
+        lines.append("-" * 60)
+        lines.append(context if context else "(no context)")
+        lines.append("")
+
+        # System prompt
+        lines.append("-" * 60)
+        lines.append("SYSTEM PROMPT:")
+        lines.append("-" * 60)
+        lines.append(self._debug_info.get('system_prompt', '(none)'))
+
+        full_text = "\n".join(lines)
+        self._show_text("Full LLM Request", full_text)
 
     def _show_text(self, title: str, text: str):
         """Show full text in a dialog."""
@@ -451,9 +530,9 @@ class MessageBubbleWidget(QtWidgets.QFrame):
         )
         main_layout.addWidget(avatar, alignment=QtCore.Qt.AlignTop)
 
-        # Content container
-        content_frame = QtWidgets.QFrame()
-        content_frame.setStyleSheet(f"""
+        # Content container - update instance vars so add_debug_info works after streaming
+        self._content_frame = QtWidgets.QFrame()
+        self._content_frame.setStyleSheet(f"""
             QFrame {{
                 background: {colors['bg']};
                 border-radius: 16px;
@@ -461,9 +540,9 @@ class MessageBubbleWidget(QtWidgets.QFrame):
             }}
         """)
 
-        content_layout = QtWidgets.QVBoxLayout(content_frame)
-        content_layout.setContentsMargins(14, 10, 14, 12)
-        content_layout.setSpacing(8)
+        self._content_layout = QtWidgets.QVBoxLayout(self._content_frame)
+        self._content_layout.setContentsMargins(14, 10, 14, 12)
+        self._content_layout.setSpacing(8)
 
         if colors['name_text']:
             name_label = QtWidgets.QLabel(colors['name_text'])
@@ -476,10 +555,10 @@ class MessageBubbleWidget(QtWidgets.QFrame):
                     border: none;
                 }}
             """)
-            content_layout.addWidget(name_label)
+            self._content_layout.addWidget(name_label)
 
-        self._render_content(content_layout, colors)
-        main_layout.addWidget(content_frame, stretch=1)
+        self._render_content(self._content_layout, colors)
+        main_layout.addWidget(self._content_frame, stretch=1)
 
 
 class TypingIndicatorWidget(QtWidgets.QFrame):
