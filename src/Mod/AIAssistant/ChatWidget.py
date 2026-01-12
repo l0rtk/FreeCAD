@@ -3,6 +3,9 @@
 Chat Widget - Main chat interface combining message list and input.
 """
 
+import FreeCAD
+FreeCAD.Console.PrintMessage("AIAssistant: ChatWidget.py loaded (v2 with system filter)\n")
+
 from PySide6 import QtWidgets, QtCore, QtGui
 from .MessageModel import ChatMessageModel, ChatMessage, MessageRole
 from .MessageDelegate import MessageBubbleWidget, TypingIndicatorWidget
@@ -380,12 +383,16 @@ class ChatWidget(QtWidgets.QWidget):
         role = msg_dict.get("role", "system")
         text = msg_dict.get("text", "")
 
+        FreeCAD.Console.PrintMessage(f"AIAssistant: add_message_from_dict ENTER - role={role!r}, text={text[:30]!r}\n")
+
         # Skip system messages - they're UI feedback and shouldn't be reloaded
-        if role == MessageRole.SYSTEM:
+        # Check both the constant and the literal string for robustness
+        if role == MessageRole.SYSTEM or role == "system":
+            FreeCAD.Console.PrintMessage(f"AIAssistant: SKIPPING system message: {text[:30]!r}\n")
             return
 
         debug_info = msg_dict.get("debug_info") if show_debug else None
-        FreeCAD.Console.PrintMessage(f"AIAssistant: add_message_from_dict role={role}, show_debug={show_debug}, has_debug_info={debug_info is not None}\n")
+        FreeCAD.Console.PrintMessage(f"AIAssistant: add_message_from_dict LOADING - role={role}, show_debug={show_debug}, has_debug_info={debug_info is not None}\n")
 
         if role == MessageRole.USER:
             self.add_user_message(text)

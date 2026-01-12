@@ -11,6 +11,8 @@ import FreeCAD
 import FreeCADGui
 from PySide6 import QtWidgets, QtCore, QtGui
 
+FreeCAD.Console.PrintMessage("AIAssistant: AIPanel.py loaded (v2 with session title)\n")
+
 from . import LLMBackend
 from . import ContextBuilder
 from . import CodeExecutor
@@ -75,9 +77,16 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
                 border-bottom: 1px solid #333;
             }
         """)
-        header.setFixedHeight(40)
+        header.setFixedHeight(50)
         header_layout = QtWidgets.QHBoxLayout(header)
         header_layout.setContentsMargins(12, 0, 12, 0)
+
+        # Title area with main title and session subtitle
+        title_area = QtWidgets.QWidget()
+        title_area.setStyleSheet("background: transparent;")
+        title_area_layout = QtWidgets.QVBoxLayout(title_area)
+        title_area_layout.setContentsMargins(0, 4, 0, 4)
+        title_area_layout.setSpacing(0)
 
         title = QtWidgets.QLabel("AI Assistant")
         title.setStyleSheet("""
@@ -85,9 +94,24 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
                 color: #e0e0e0;
                 font-weight: bold;
                 font-size: 14px;
+                background: transparent;
             }
         """)
-        header_layout.addWidget(title)
+        title_area_layout.addWidget(title)
+
+        # Session title label
+        self._session_label = QtWidgets.QLabel("")
+        self._session_label.setStyleSheet("""
+            QLabel {
+                color: #666;
+                font-size: 11px;
+                background: transparent;
+            }
+        """)
+        self._session_label.hide()  # Hidden until a session is loaded
+        title_area_layout.addWidget(self._session_label)
+
+        header_layout.addWidget(title_area)
         header_layout.addStretch()
 
         # Sessions button
@@ -311,12 +335,16 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         """Start a new session."""
         self._on_clear()
         self.session_manager.clear_current_session()
+        self._session_label.hide()
         self._chat.add_system_message("New session started")
 
     def _on_load_session(self, session_id):
         """Load a previous session."""
         messages = self.session_manager.load_session(session_id)
         self._chat.clear_chat()
+
+        # Update session title in header
+        self._update_session_title(session_id, messages)
 
         # Temporarily disconnect to avoid re-saving loaded messages
         try:
@@ -341,6 +369,37 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self._chat._chat_list._model.message_added.connect(
             self.session_manager.save_message
         )
+
+    def _update_session_title(self, session_id: str, messages: list):
+        """Update the session title in the header."""
+        FreeCAD.Console.PrintMessage(f"AIAssistant: _update_session_title called with session_id={session_id}\n")
+
+        # Get session date from ID
+        try:
+            session_date = datetime.strptime(session_id, "%Y-%m-%d_%H-%M-%S")
+            now = datetime.now()
+
+            if session_date.date() == now.date():
+                date_str = session_date.strftime("Today %H:%M")
+            else:
+                date_str = session_date.strftime("%b %d, %H:%M")
+        except ValueError:
+            date_str = session_id
+
+        # Get preview from first user message
+        preview = ""
+        for msg in messages:
+            if msg.get("role") == "user":
+                text = msg.get("text", "")
+                preview = text[:40] + "..." if len(text) > 40 else text
+                break
+
+        # Set label
+        title_text = f"{date_str} - {preview}" if preview else date_str
+        FreeCAD.Console.PrintMessage(f"AIAssistant: Setting session title to: {title_text}\n")
+        self._session_label.setText(title_text)
+        self._session_label.show()
+        FreeCAD.Console.PrintMessage(f"AIAssistant: Session label visible={self._session_label.isVisible()}\n")
 
     def _open_sessions_folder(self):
         """Open the sessions folder in file manager."""
