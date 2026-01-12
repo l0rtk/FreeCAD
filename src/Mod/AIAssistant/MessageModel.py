@@ -87,6 +87,9 @@ class ChatMessageModel(QtCore.QAbstractListModel):
     DisplayedTextRole = QtCore.Qt.UserRole + 6
     HasCodeRole = QtCore.Qt.UserRole + 7
 
+    # Signal emitted when a message is added (for session persistence)
+    message_added = QtCore.Signal(object)  # Emits ChatMessage
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self._messages: List[ChatMessage] = []
@@ -145,6 +148,11 @@ class ChatMessageModel(QtCore.QAbstractListModel):
         self._messages.append(message)
 
         self.endInsertRows()
+
+        # Emit signal for session persistence (only for non-streaming messages)
+        if not is_streaming:
+            self.message_added.emit(message)
+
         return row
 
     def update_message(self, row: int, text: str = None, displayed_text: str = None,
@@ -154,6 +162,7 @@ class ChatMessageModel(QtCore.QAbstractListModel):
             return
 
         message = self._messages[row]
+        was_streaming = message.is_streaming
 
         if text is not None:
             message.text = text
@@ -165,6 +174,10 @@ class ChatMessageModel(QtCore.QAbstractListModel):
 
         index = self.index(row)
         self.dataChanged.emit(index, index)
+
+        # Emit signal when streaming completes (for session persistence)
+        if was_streaming and is_streaming is False:
+            self.message_added.emit(message)
 
     def get_message(self, row: int) -> Optional[ChatMessage]:
         """Get message at row."""

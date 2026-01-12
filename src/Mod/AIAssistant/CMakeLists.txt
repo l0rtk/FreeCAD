@@ -15,6 +15,7 @@ SET(AIAssistant_SRCS
     MessageDelegate.py
     CodeBlockWidget.py
     SyntaxHighlighter.py
+    SessionManager.py
 )
 
 SOURCE_GROUP("" FILES ${AIAssistant_SRCS})

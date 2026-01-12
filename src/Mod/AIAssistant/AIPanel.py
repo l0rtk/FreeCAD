@@ -12,6 +12,7 @@ from . import LLMBackend
 from . import ContextBuilder
 from . import CodeExecutor
 from .ChatWidget import ChatWidget
+from .SessionManager import SessionManager
 
 
 class LLMWorker(QtCore.QThread):
@@ -48,6 +49,9 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self.worker = None
         self.pending_input = None
         self._last_code = ""
+
+        # Session manager for persisting conversations
+        self.session_manager = SessionManager()
 
         self._setup_ui()
         self._connect_signals()
@@ -188,6 +192,11 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self._chat.messageSubmitted.connect(self._on_send)
         self._chat.runCodeRequested.connect(self._on_run_code)
 
+        # Connect to session manager for auto-save
+        self._chat._chat_list._model.message_added.connect(
+            self.session_manager.save_message
+        )
+
     def _on_send(self, user_input: str):
         """Handle message submission."""
         if not user_input:
@@ -262,6 +271,7 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self._last_code = ""
 
     def _clear_conversation(self):
-        """Clear conversation history."""
+        """Clear conversation history and start new session."""
         self._on_clear()
-        self._chat.add_system_message("Conversation cleared")
+        self.session_manager.clear_current_session()
+        self._chat.add_system_message("Conversation cleared - new session started")
