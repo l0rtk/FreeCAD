@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """
 Context Builder - Gathers FreeCAD document state for AI context.
-Provides detailed structural information to help AI understand existing designs.
+Provides detailed information about all objects to help AI understand existing designs.
 """
 
 import FreeCAD
@@ -25,189 +25,468 @@ def build_context() -> str:
 
     lines.append(f"## Document: {doc.Name}")
 
-    # Categorize objects by structural type
+    # Get all objects
     objects = doc.Objects
     if not objects:
         lines.append("\nDocument is empty - ready for new design.")
         return "\n".join(lines)
 
-    # Sort objects into categories
-    columns = []
-    beams = []
-    slabs = []
-    walls = []
-    other_structures = []
+    # Categorize objects by type
+    bodies = []
+    part_primitives = []
+    part_features = []
+    sketches = []
+    partdesign_features = []
+    arch_structures = []
+    arch_walls = []
+    datums = []
     other_objects = []
 
     for obj in objects:
-        category = _categorize_object(obj)
-        if category == "column":
-            columns.append(obj)
-        elif category == "beam":
-            beams.append(obj)
-        elif category == "slab":
-            slabs.append(obj)
-        elif category == "wall":
-            walls.append(obj)
-        elif category == "structure":
-            other_structures.append(obj)
+        category = _categorize_object_v2(obj)
+        if category == "body":
+            bodies.append(obj)
+        elif category == "part_primitive":
+            part_primitives.append(obj)
+        elif category == "part_feature":
+            part_features.append(obj)
+        elif category == "sketch":
+            sketches.append(obj)
+        elif category == "partdesign_feature":
+            partdesign_features.append(obj)
+        elif category == "arch_structure":
+            arch_structures.append(obj)
+        elif category == "arch_wall":
+            arch_walls.append(obj)
+        elif category == "datum":
+            datums.append(obj)
         else:
             other_objects.append(obj)
 
     # Summary
     lines.append(f"\n### Summary: {len(objects)} objects")
     summary_parts = []
-    if columns:
-        summary_parts.append(f"{len(columns)} columns")
-    if beams:
-        summary_parts.append(f"{len(beams)} beams")
-    if slabs:
-        summary_parts.append(f"{len(slabs)} slabs")
-    if walls:
-        summary_parts.append(f"{len(walls)} walls")
-    if other_structures:
-        summary_parts.append(f"{len(other_structures)} other structures")
+    if bodies:
+        summary_parts.append(f"{len(bodies)} bodies")
+    if part_primitives:
+        summary_parts.append(f"{len(part_primitives)} primitives")
+    if sketches:
+        summary_parts.append(f"{len(sketches)} sketches")
+    if partdesign_features:
+        summary_parts.append(f"{len(partdesign_features)} PartDesign features")
+    if arch_structures:
+        summary_parts.append(f"{len(arch_structures)} structures")
+    if arch_walls:
+        summary_parts.append(f"{len(arch_walls)} walls")
     if other_objects:
         summary_parts.append(f"{len(other_objects)} other")
     if summary_parts:
         lines.append(f"  {', '.join(summary_parts)}")
 
-    # Detail each category
-    if columns:
-        lines.append("\n### Columns:")
-        for obj in columns[:10]:
-            lines.append(_describe_structure(obj))
-        if len(columns) > 10:
-            lines.append(f"  ... and {len(columns) - 10} more columns")
+    # Bodies with their feature trees
+    if bodies:
+        lines.append("\n### Bodies:")
+        for body in bodies[:5]:
+            lines.append(_describe_body(body))
+        if len(bodies) > 5:
+            lines.append(f"  ... and {len(bodies) - 5} more bodies")
 
-    if beams:
-        lines.append("\n### Beams:")
-        for obj in beams[:10]:
-            lines.append(_describe_structure(obj))
-        if len(beams) > 10:
-            lines.append(f"  ... and {len(beams) - 10} more beams")
+    # Part primitives (Box, Cylinder, Sphere, etc.)
+    if part_primitives:
+        lines.append("\n### Part Primitives:")
+        for obj in part_primitives[:10]:
+            lines.append(_describe_part_primitive(obj))
+        if len(part_primitives) > 10:
+            lines.append(f"  ... and {len(part_primitives) - 10} more primitives")
 
-    if slabs:
-        lines.append("\n### Slabs:")
-        for obj in slabs[:10]:
-            lines.append(_describe_structure(obj))
-        if len(slabs) > 10:
-            lines.append(f"  ... and {len(slabs) - 10} more slabs")
+    # Part features (Boolean operations, etc.)
+    if part_features:
+        lines.append("\n### Part Features:")
+        for obj in part_features[:5]:
+            lines.append(_describe_part_feature(obj))
+        if len(part_features) > 5:
+            lines.append(f"  ... and {len(part_features) - 5} more features")
 
-    if walls:
+    # Sketches
+    if sketches:
+        lines.append("\n### Sketches:")
+        for obj in sketches[:5]:
+            lines.append(_describe_sketch(obj))
+        if len(sketches) > 5:
+            lines.append(f"  ... and {len(sketches) - 5} more sketches")
+
+    # PartDesign features (standalone, not in bodies)
+    standalone_pd = [f for f in partdesign_features if not _is_in_body(f)]
+    if standalone_pd:
+        lines.append("\n### PartDesign Features:")
+        for obj in standalone_pd[:5]:
+            lines.append(_describe_partdesign_feature(obj))
+
+    # Arch structures
+    if arch_structures:
+        lines.append("\n### Architectural Structures:")
+        for obj in arch_structures[:10]:
+            lines.append(_describe_arch_structure(obj))
+        if len(arch_structures) > 10:
+            lines.append(f"  ... and {len(arch_structures) - 10} more structures")
+
+    # Arch walls
+    if arch_walls:
         lines.append("\n### Walls:")
-        for obj in walls[:10]:
-            lines.append(_describe_wall(obj))
-        if len(walls) > 10:
-            lines.append(f"  ... and {len(walls) - 10} more walls")
+        for obj in arch_walls[:10]:
+            lines.append(_describe_arch_wall(obj))
+        if len(arch_walls) > 10:
+            lines.append(f"  ... and {len(arch_walls) - 10} more walls")
 
-    if other_structures:
-        lines.append("\n### Other Structures:")
-        for obj in other_structures[:5]:
-            lines.append(_describe_structure(obj))
-
+    # Other objects
     if other_objects:
-        lines.append("\n### Other Objects:")
-        for obj in other_objects[:5]:
-            lines.append(_describe_object(obj))
-        if len(other_objects) > 5:
-            lines.append(f"  ... and {len(other_objects) - 5} more objects")
+        # Filter out origins and internal objects
+        visible_other = [o for o in other_objects if not _is_internal_object(o)]
+        if visible_other:
+            lines.append("\n### Other Objects:")
+            for obj in visible_other[:5]:
+                lines.append(_describe_generic_object(obj))
+            if len(visible_other) > 5:
+                lines.append(f"  ... and {len(visible_other) - 5} more objects")
 
-    # Grid analysis
-    grid_info = _analyze_grid(columns)
-    if grid_info:
-        lines.append(f"\n### Grid Layout:")
-        lines.append(f"  {grid_info}")
-
-    # Selection info
+    # Selection info (important for context)
     try:
         selection = FreeCADGui.Selection.getSelection()
         if selection:
-            lines.append(f"\n### Selected: {', '.join(o.Label for o in selection)}")
+            lines.append(f"\n### Currently Selected:")
+            for obj in selection[:3]:
+                lines.append(f"  - {obj.Label} ({obj.TypeId})")
+            if len(selection) > 3:
+                lines.append(f"  ... and {len(selection) - 3} more selected")
     except Exception:
         pass
 
     return "\n".join(lines)
 
 
-def _categorize_object(obj) -> str:
-    """Determine the structural category of an object."""
-    # Check IfcType first (most reliable for Arch objects)
-    if hasattr(obj, "IfcType"):
-        ifc = obj.IfcType.lower() if obj.IfcType else ""
-        if "column" in ifc:
-            return "column"
-        elif "beam" in ifc:
-            return "beam"
-        elif "slab" in ifc or "floor" in ifc or "roof" in ifc:
-            return "slab"
-        elif "wall" in ifc:
-            return "wall"
+def _categorize_object_v2(obj) -> str:
+    """Categorize object by its TypeId for comprehensive context."""
+    type_id = obj.TypeId
 
-    # Check TypeId
-    type_id = obj.TypeId.lower()
-    if "wall" in type_id:
-        return "wall"
-    if "structure" in type_id:
-        # Infer from dimensions: height > length = column, else beam
-        try:
-            if hasattr(obj, "Height") and hasattr(obj, "Length"):
-                h = obj.Height.Value
-                l = obj.Length.Value
-                if h > l:
-                    return "column"
-                else:
-                    return "beam"
-        except Exception:
-            pass
-        return "structure"
+    # Bodies
+    if type_id == "PartDesign::Body":
+        return "body"
 
-    # Check label for hints
-    label = obj.Label.lower()
-    if "column" in label or "col_" in label:
-        return "column"
-    elif "beam" in label:
-        return "beam"
-    elif "slab" in label:
-        return "slab"
-    elif "wall" in label:
-        return "wall"
+    # Part primitives
+    if type_id in ("Part::Box", "Part::Cylinder", "Part::Sphere", "Part::Cone",
+                   "Part::Torus", "Part::Ellipsoid", "Part::Prism", "Part::Wedge",
+                   "Part::Helix", "Part::Spiral"):
+        return "part_primitive"
+
+    # Part features (Boolean, etc.)
+    if type_id.startswith("Part::") and type_id not in ("Part::Feature", "Part::Part2DObject"):
+        if "Cut" in type_id or "Fuse" in type_id or "Common" in type_id:
+            return "part_feature"
+        if "Extrusion" in type_id or "Revolution" in type_id:
+            return "part_feature"
+
+    # Generic Part::Feature (could be anything with a shape)
+    if type_id == "Part::Feature":
+        return "part_primitive"
+
+    # Sketches
+    if type_id == "Sketcher::SketchObject":
+        return "sketch"
+
+    # PartDesign features
+    if type_id.startswith("PartDesign::"):
+        if type_id == "PartDesign::Body":
+            return "body"
+        return "partdesign_feature"
+
+    # Arch structures
+    if type_id == "Arch::Structure":
+        return "arch_structure"
+
+    # Arch walls
+    if type_id == "Arch::Wall":
+        return "arch_wall"
+
+    # Datums
+    if "Datum" in type_id or type_id in ("App::Plane", "App::Line", "App::Origin"):
+        return "datum"
 
     return "other"
 
 
-def _describe_structure(obj) -> str:
-    """Describe an Arch Structure object with dimensions."""
-    parts = [f"  - {obj.Label}"]
-
-    # Get dimensions
-    dims = []
+def _is_in_body(obj) -> bool:
+    """Check if object is part of a Body."""
     try:
-        if hasattr(obj, "Width") and obj.Width.Value > 0:
-            dims.append(f"{obj.Width.Value:.0f}")
-        if hasattr(obj, "Length") and obj.Length.Value > 0:
-            # For columns, Length is often the "depth"
-            dims.append(f"{obj.Length.Value:.0f}")
-        if hasattr(obj, "Height") and obj.Height.Value > 0:
-            dims.append(f"H={obj.Height.Value:.0f}")
+        parents = obj.InList
+        for parent in parents:
+            if parent.TypeId == "PartDesign::Body":
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _is_internal_object(obj) -> bool:
+    """Check if object is internal (Origin, planes, etc.)."""
+    type_id = obj.TypeId
+    if type_id in ("App::Origin", "App::Plane", "App::Line", "App::Point"):
+        return True
+    if "Origin" in obj.Label:
+        return True
+    return False
+
+
+def _describe_body(body) -> str:
+    """Describe a PartDesign Body with its feature tree."""
+    lines = [f"  - {body.Label}"]
+
+    try:
+        # Get tip (active feature)
+        if hasattr(body, "Tip") and body.Tip:
+            lines[0] += f" (tip: {body.Tip.Label})"
+
+        # List features in order
+        if hasattr(body, "Group"):
+            features = [f for f in body.Group if not _is_internal_object(f)]
+            if features:
+                for feat in features[:5]:
+                    feat_desc = _describe_partdesign_feature(feat, indent=4)
+                    lines.append(feat_desc)
+                if len(features) > 5:
+                    lines.append(f"      ... and {len(features) - 5} more features")
+
+        # Shape info
+        if hasattr(body, "Shape") and body.Shape.isValid():
+            vol = body.Shape.Volume
+            if vol > 0:
+                lines.append(f"    Volume: {vol:.0f} mm³")
     except Exception:
         pass
 
-    if dims:
-        parts.append(f"[{' x '.join(dims)} mm]")
+    return "\n".join(lines)
 
-    # Position
+
+def _describe_part_primitive(obj) -> str:
+    """Describe a Part primitive with its specific parameters."""
+    type_id = obj.TypeId
+    parts = [f"  - {obj.Label}"]
+
     try:
+        if type_id == "Part::Box":
+            l = getattr(obj, "Length", None)
+            w = getattr(obj, "Width", None)
+            h = getattr(obj, "Height", None)
+            if l and w and h:
+                parts.append(f"Box [{l.Value:.0f} x {w.Value:.0f} x {h.Value:.0f} mm]")
+
+        elif type_id == "Part::Cylinder":
+            r = getattr(obj, "Radius", None)
+            h = getattr(obj, "Height", None)
+            if r and h:
+                parts.append(f"Cylinder [r={r.Value:.0f}, h={h.Value:.0f} mm]")
+
+        elif type_id == "Part::Sphere":
+            r = getattr(obj, "Radius", None)
+            if r:
+                parts.append(f"Sphere [r={r.Value:.0f} mm]")
+
+        elif type_id == "Part::Cone":
+            r1 = getattr(obj, "Radius1", None)
+            r2 = getattr(obj, "Radius2", None)
+            h = getattr(obj, "Height", None)
+            if r1 and r2 and h:
+                parts.append(f"Cone [r1={r1.Value:.0f}, r2={r2.Value:.0f}, h={h.Value:.0f} mm]")
+
+        elif type_id == "Part::Torus":
+            r1 = getattr(obj, "Radius1", None)
+            r2 = getattr(obj, "Radius2", None)
+            if r1 and r2:
+                parts.append(f"Torus [R={r1.Value:.0f}, r={r2.Value:.0f} mm]")
+
+        elif type_id == "Part::Feature":
+            # Generic feature - describe by shape
+            if hasattr(obj, "Shape") and obj.Shape.isValid():
+                bb = obj.Shape.BoundBox
+                parts.append(f"Shape [{bb.XLength:.0f} x {bb.YLength:.0f} x {bb.ZLength:.0f} mm]")
+
+        else:
+            parts.append(f"({type_id.split('::')[1]})")
+
+        # Position
         if hasattr(obj, "Placement"):
             pos = obj.Placement.Base
-            parts.append(f"at ({pos.x:.0f}, {pos.y:.0f}, {pos.z:.0f})")
+            if pos.x != 0 or pos.y != 0 or pos.z != 0:
+                parts.append(f"at ({pos.x:.0f}, {pos.y:.0f}, {pos.z:.0f})")
+
+    except Exception as e:
+        parts.append(f"(error: {e})")
+
+    return " ".join(parts)
+
+
+def _describe_part_feature(obj) -> str:
+    """Describe a Part feature (Boolean, extrusion, etc.)."""
+    type_id = obj.TypeId
+    parts = [f"  - {obj.Label}"]
+
+    try:
+        op_name = type_id.split("::")[-1]
+        parts.append(f"({op_name})")
+
+        # For Boolean operations, show operands
+        if hasattr(obj, "Base") and obj.Base:
+            parts.append(f"on {obj.Base.Label}")
+        if hasattr(obj, "Tool") and obj.Tool:
+            parts.append(f"with {obj.Tool.Label}")
+
     except Exception:
         pass
 
     return " ".join(parts)
 
 
-def _describe_wall(obj) -> str:
+def _describe_sketch(obj) -> str:
+    """Describe a Sketch with geometry and constraint info."""
+    parts = [f"  - {obj.Label}"]
+
+    try:
+        # Geometry count
+        if hasattr(obj, "GeometryCount"):
+            geom_count = obj.GeometryCount
+        elif hasattr(obj, "Geometry"):
+            geom_count = len(obj.Geometry)
+        else:
+            geom_count = 0
+
+        # Constraint count
+        if hasattr(obj, "ConstraintCount"):
+            const_count = obj.ConstraintCount
+        elif hasattr(obj, "Constraints"):
+            const_count = len(obj.Constraints)
+        else:
+            const_count = 0
+
+        parts.append(f"[{geom_count} geometry, {const_count} constraints]")
+
+        # Fully constrained status
+        if hasattr(obj, "FullyConstrained"):
+            if obj.FullyConstrained:
+                parts.append("(fully constrained)")
+            else:
+                # Get DoF if available
+                try:
+                    dof = obj.solve()
+                    if dof > 0:
+                        parts.append(f"({dof} DoF)")
+                except Exception:
+                    parts.append("(under-constrained)")
+
+        # Support/attachment
+        if hasattr(obj, "AttachmentSupport") and obj.AttachmentSupport:
+            support = obj.AttachmentSupport
+            if isinstance(support, tuple) and len(support) > 0:
+                parts.append(f"on {support[0].Label}")
+
+    except Exception:
+        pass
+
+    return " ".join(parts)
+
+
+def _describe_partdesign_feature(obj, indent=2) -> str:
+    """Describe a PartDesign feature with parameters."""
+    prefix = " " * indent + "- "
+    type_id = obj.TypeId
+    parts = [f"{prefix}{obj.Label}"]
+
+    try:
+        feat_type = type_id.split("::")[-1]
+
+        if feat_type == "Pad":
+            length = getattr(obj, "Length", None)
+            if length:
+                parts.append(f"Pad [{length.Value:.0f} mm]")
+            profile = getattr(obj, "Profile", None)
+            if profile and hasattr(profile, "__len__") and len(profile) > 0:
+                parts.append(f"from {profile[0].Label}")
+
+        elif feat_type == "Pocket":
+            length = getattr(obj, "Length", None)
+            if length:
+                parts.append(f"Pocket [{length.Value:.0f} mm]")
+
+        elif feat_type == "Fillet":
+            radius = getattr(obj, "Radius", None)
+            if radius:
+                parts.append(f"Fillet [r={radius.Value:.0f} mm]")
+
+        elif feat_type == "Chamfer":
+            size = getattr(obj, "Size", None)
+            if size:
+                parts.append(f"Chamfer [{size.Value:.0f} mm]")
+
+        elif feat_type == "Revolution":
+            angle = getattr(obj, "Angle", None)
+            if angle:
+                parts.append(f"Revolution [{angle.Value:.0f}°]")
+
+        elif feat_type == "Hole":
+            diameter = getattr(obj, "Diameter", None)
+            depth = getattr(obj, "Depth", None)
+            if diameter:
+                parts.append(f"Hole [d={diameter.Value:.0f} mm]")
+
+        elif feat_type in ("LinearPattern", "PolarPattern", "Mirrored"):
+            occurrences = getattr(obj, "Occurrences", None)
+            if occurrences:
+                parts.append(f"{feat_type} [{occurrences} copies]")
+            else:
+                parts.append(f"({feat_type})")
+
+        else:
+            parts.append(f"({feat_type})")
+
+    except Exception:
+        pass
+
+    return " ".join(parts)
+
+
+def _describe_arch_structure(obj) -> str:
+    """Describe an Arch Structure object with dimensions."""
+    parts = [f"  - {obj.Label}"]
+
+    try:
+        # Determine type (column, beam, slab)
+        struct_type = "Structure"
+        if hasattr(obj, "IfcType") and obj.IfcType:
+            struct_type = obj.IfcType
+
+        dims = []
+        if hasattr(obj, "Width") and obj.Width.Value > 0:
+            dims.append(f"{obj.Width.Value:.0f}")
+        if hasattr(obj, "Length") and obj.Length.Value > 0:
+            dims.append(f"{obj.Length.Value:.0f}")
+        if hasattr(obj, "Height") and obj.Height.Value > 0:
+            dims.append(f"H={obj.Height.Value:.0f}")
+
+        if dims:
+            parts.append(f"{struct_type} [{' x '.join(dims)} mm]")
+        else:
+            parts.append(f"({struct_type})")
+
+        # Position
+        if hasattr(obj, "Placement"):
+            pos = obj.Placement.Base
+            parts.append(f"at ({pos.x:.0f}, {pos.y:.0f}, {pos.z:.0f})")
+
+    except Exception:
+        pass
+
+    return " ".join(parts)
+
+
+def _describe_arch_wall(obj) -> str:
     """Describe an Arch Wall object."""
     parts = [f"  - {obj.Label}"]
 
@@ -219,70 +498,45 @@ def _describe_wall(obj) -> str:
             dims.append(f"W={obj.Width.Value:.0f}")
         if hasattr(obj, "Height") and obj.Height.Value > 0:
             dims.append(f"H={obj.Height.Value:.0f}")
-        if dims:
-            parts.append(f"[{', '.join(dims)} mm]")
-    except Exception:
-        pass
 
-    try:
+        if dims:
+            parts.append(f"Wall [{', '.join(dims)} mm]")
+
         if hasattr(obj, "Placement"):
             pos = obj.Placement.Base
             parts.append(f"at ({pos.x:.0f}, {pos.y:.0f}, {pos.z:.0f})")
+
     except Exception:
         pass
 
     return " ".join(parts)
 
 
-def _describe_object(obj) -> str:
-    """Create a brief description of any FreeCAD object."""
-    info = f"  - {obj.Label} ({obj.TypeId})"
+def _describe_generic_object(obj) -> str:
+    """Describe any FreeCAD object with available info."""
+    parts = [f"  - {obj.Label}"]
 
-    # Add bounding box info for shapes
     try:
-        if hasattr(obj, "Shape") and hasattr(obj.Shape, "BoundBox"):
+        # Type
+        type_name = obj.TypeId.split("::")[-1]
+        parts.append(f"({type_name})")
+
+        # Shape info if available
+        if hasattr(obj, "Shape") and obj.Shape.isValid():
             bb = obj.Shape.BoundBox
             if bb.isValid():
-                info += f" [{bb.XLength:.0f} x {bb.YLength:.0f} x {bb.ZLength:.0f} mm]"
+                parts.append(f"[{bb.XLength:.0f} x {bb.YLength:.0f} x {bb.ZLength:.0f} mm]")
+
+        # Position if not at origin
+        if hasattr(obj, "Placement"):
+            pos = obj.Placement.Base
+            if pos.x != 0 or pos.y != 0 or pos.z != 0:
+                parts.append(f"at ({pos.x:.0f}, {pos.y:.0f}, {pos.z:.0f})")
+
     except Exception:
         pass
 
-    return info
-
-
-def _analyze_grid(columns: list) -> str:
-    """Analyze column positions to detect grid pattern."""
-    if len(columns) < 2:
-        return ""
-
-    try:
-        # Collect X and Y positions
-        x_positions = set()
-        y_positions = set()
-
-        for col in columns:
-            if hasattr(col, "Placement"):
-                pos = col.Placement.Base
-                # Round to nearest 100mm to group similar positions
-                x_positions.add(round(pos.x / 100) * 100)
-                y_positions.add(round(pos.y / 100) * 100)
-
-        x_sorted = sorted(x_positions)
-        y_sorted = sorted(y_positions)
-
-        if len(x_sorted) >= 2 and len(y_sorted) >= 2:
-            # Calculate typical spacing
-            x_spacing = x_sorted[1] - x_sorted[0] if len(x_sorted) > 1 else 0
-            y_spacing = y_sorted[1] - y_sorted[0] if len(y_sorted) > 1 else 0
-
-            return (
-                f"{len(x_sorted)}x{len(y_sorted)} grid, "
-                f"spacing ~{x_spacing:.0f} x {y_spacing:.0f} mm"
-            )
-    except Exception:
-        pass
-
-    return ""
+    return " ".join(parts)
 
 
 def get_selected_objects() -> list:
