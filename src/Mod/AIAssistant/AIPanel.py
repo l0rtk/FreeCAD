@@ -325,8 +325,9 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         except RuntimeError:
             pass  # Already disconnected
 
+        show_debug = self.debug_action.isChecked()
         for i, msg in enumerate(messages):
-            self._chat.add_message_from_dict(msg)
+            self._chat.add_message_from_dict(msg, show_debug=show_debug)
             # Process events every 5 messages to keep UI responsive
             if i % 5 == 0:
                 QtCore.QCoreApplication.processEvents()

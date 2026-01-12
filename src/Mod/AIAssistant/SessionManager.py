@@ -217,7 +217,27 @@ class SessionManager:
                 data = json.load(f)
                 self._current_session_id = session_id
                 self._current_session_data = data
-                return data.get("messages", [])
+
+                messages = data.get("messages", [])
+                llm_requests = data.get("llm_requests", [])
+
+                # Match assistant messages with their debug info from llm_requests
+                llm_request_idx = 0
+                for msg in messages:
+                    if msg.get("role") == "assistant" and llm_request_idx < len(llm_requests):
+                        req = llm_requests[llm_request_idx]
+                        msg["debug_info"] = {
+                            "duration_ms": req.get("response", {}).get("duration_ms", 0),
+                            "model": req.get("request", {}).get("model", "unknown"),
+                            "context_length": len(req.get("request", {}).get("context", "")),
+                            "system_prompt": req.get("request", {}).get("system_prompt", ""),
+                            "context": req.get("request", {}).get("context", ""),
+                            "conversation_history": req.get("request", {}).get("conversation_history", []),
+                            "user_message": req.get("request", {}).get("user_message", ""),
+                        }
+                        llm_request_idx += 1
+
+                return messages
         except Exception as e:
             FreeCAD.Console.PrintError(f"AIAssistant: Failed to load session: {e}\n")
             return []

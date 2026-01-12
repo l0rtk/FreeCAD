@@ -368,15 +368,16 @@ class ChatWidget(QtWidgets.QWidget):
         """Add an error message."""
         self._chat_list.add_message(text, MessageRole.ERROR)
 
-    def add_message_from_dict(self, msg_dict: dict):
+    def add_message_from_dict(self, msg_dict: dict, show_debug: bool = False):
         """Load a message from session JSON."""
         role = msg_dict.get("role", "system")
         text = msg_dict.get("text", "")
+        debug_info = msg_dict.get("debug_info") if show_debug else None
 
         if role == MessageRole.USER:
             self.add_user_message(text)
         elif role == MessageRole.ASSISTANT:
-            self.add_assistant_message(text, stream=False)
+            self.add_assistant_message(text, stream=False, debug_info=debug_info)
         elif role == MessageRole.SYSTEM:
             self.add_system_message(text)
         elif role == MessageRole.ERROR:
