@@ -6,6 +6,219 @@ Provides detailed information about all objects to help AI understand existing d
 
 import FreeCAD
 import FreeCADGui
+from collections import deque
+
+
+# Global buffer for console messages (errors and warnings)
+_console_buffer = deque(maxlen=50)  # Keep last 50 messages
+_console_observer = None
+
+
+class ConsoleObserver:
+    """Observer that captures FreeCAD console messages."""
+
+    def __init__(self, buffer):
+        self._buffer = buffer
+
+    def Error(self, msg):
+        """Capture error messages."""
+        self._buffer.append(("error", msg.strip()))
+
+    def Warning(self, msg):
+        """Capture warning messages."""
+        self._buffer.append(("warning", msg.strip()))
+
+    def Message(self, msg):
+        """Capture regular messages (optional, filtered)."""
+        # Only capture messages that might be useful (skip noise)
+        msg_stripped = msg.strip()
+        if msg_stripped and any(kw in msg_stripped.lower() for kw in
+                                 ["failed", "invalid", "cannot", "error", "exception"]):
+            self._buffer.append(("message", msg_stripped))
+
+    def Log(self, msg):
+        """Capture log messages (skip most, too verbose)."""
+        pass
+
+
+def start_console_observer():
+    """Start capturing console messages.
+
+    Note: FreeCAD's Console observer API is not available in Python,
+    so this is currently a no-op. The buffer remains empty.
+    """
+    # FreeCAD.Console.AddObserver doesn't exist in Python API
+    # This feature would require C++ implementation
+    pass
+
+
+def stop_console_observer():
+    """Stop capturing console messages."""
+    # No-op since observer couldn't be started
+    pass
+
+
+def get_console_buffer():
+    """Get the current console buffer contents."""
+    return list(_console_buffer)
+
+
+def clear_console_buffer():
+    """Clear the console buffer."""
+    _console_buffer.clear()
+
+
+# =============================================================================
+# ENVIRONMENT CONTEXT - Application state beyond document objects
+# =============================================================================
+
+def _get_environment_context() -> str:
+    """Get FreeCAD environment information.
+
+    This provides context about the application state - what version,
+    what workbench, what units - so AI can tailor suggestions appropriately.
+    """
+    lines = []
+
+    try:
+        # Version info
+        version = FreeCAD.Version()
+        if version and len(version) >= 2:
+            ver_str = f"{version[0]}.{version[1]}"
+            if len(version) > 2 and version[2]:
+                ver_str += f".{version[2]}"
+            lines.append(f"FreeCAD {ver_str}")
+    except Exception:
+        lines.append("FreeCAD (version unknown)")
+
+    # Active workbench
+    try:
+        wb = FreeCADGui.activeWorkbench()
+        if wb:
+            wb_name = wb.name() if hasattr(wb, 'name') else str(type(wb).__name__)
+            # Clean up workbench name
+            wb_name = wb_name.replace("Workbench", "").strip()
+            lines.append(f"Workbench: {wb_name}")
+    except Exception:
+        pass
+
+    # Units system
+    try:
+        from FreeCAD import Units
+        schema = Units.getSchema()
+        decimals = Units.getDecimals()
+        lines.append(f"Units: {schema} ({decimals} decimals)")
+    except Exception:
+        pass
+
+    return " | ".join(lines) if lines else ""
+
+
+def _get_open_documents() -> str:
+    """Get list of open documents (beyond active one).
+
+    Useful for AI to know what other documents are available for reference.
+    """
+    try:
+        docs = FreeCAD.listDocuments()
+        if len(docs) <= 1:
+            return ""
+
+        active_name = FreeCAD.ActiveDocument.Name if FreeCAD.ActiveDocument else None
+        other_docs = [name for name in docs.keys() if name != active_name]
+
+        if other_docs:
+            return f"Other open documents: {', '.join(other_docs[:5])}"
+    except Exception:
+        pass
+    return ""
+
+
+def _get_workbench_tools() -> str:
+    """Get available tools/features for the active workbench.
+
+    This helps AI suggest operations that are actually available.
+    """
+    try:
+        wb = FreeCADGui.activeWorkbench()
+        if not wb:
+            return ""
+
+        wb_name = wb.name() if hasattr(wb, 'name') else ""
+
+        # Map workbench to key capabilities
+        capabilities = {
+            "PartDesignWorkbench": "Pad, Pocket, Fillet, Chamfer, Revolution, Hole, Pattern",
+            "PartWorkbench": "Box, Cylinder, Sphere, Cone, Boolean (Cut/Fuse/Common), Extrude",
+            "SketcherWorkbench": "Line, Circle, Arc, Rectangle, Constraints, Dimensions",
+            "DraftWorkbench": "Line, Wire, Circle, Rectangle, Polygon, BSpline, Text",
+            "ArchWorkbench": "Wall, Structure, Window, Roof, Floor, Building",
+            "TechDrawWorkbench": "Page, View, Dimension, Annotation",
+            "SpreadsheetWorkbench": "Cell editing, Aliases, Formulas",
+        }
+
+        if wb_name in capabilities:
+            return f"Available tools: {capabilities[wb_name]}"
+    except Exception:
+        pass
+    return ""
+
+
+def _get_selection_details() -> str:
+    """Get detailed selection information including sub-elements.
+
+    Goes beyond just object names - shows what faces, edges, vertices
+    are selected, which is crucial for operations like Fillet, Chamfer.
+    """
+    try:
+        sel_ex = FreeCADGui.Selection.getSelectionEx()
+        if not sel_ex:
+            return ""
+
+        details = []
+        for sel in sel_ex[:3]:  # Limit to first 3 selected objects
+            obj_name = sel.Object.Label
+            sub_elements = sel.SubElementNames
+
+            if sub_elements:
+                # Group by type (Face, Edge, Vertex)
+                faces = [s for s in sub_elements if s.startswith("Face")]
+                edges = [s for s in sub_elements if s.startswith("Edge")]
+                vertices = [s for s in sub_elements if s.startswith("Vertex")]
+
+                parts = [obj_name]
+                if faces:
+                    parts.append(f"{len(faces)} faces")
+                if edges:
+                    parts.append(f"{len(edges)} edges")
+                if vertices:
+                    parts.append(f"{len(vertices)} vertices")
+
+                details.append(" → ".join(parts))
+            else:
+                details.append(f"{obj_name} (whole object)")
+
+        if details:
+            return "Selection: " + "; ".join(details)
+    except Exception:
+        pass
+    return ""
+
+
+def _get_import_export_formats() -> str:
+    """Get supported import/export formats.
+
+    Useful when user asks about file format compatibility.
+    """
+    try:
+        # Common formats - don't need to enumerate all
+        common_import = ["STEP", "IGES", "STL", "OBJ", "DXF", "SVG", "FCStd"]
+        common_export = ["STEP", "IGES", "STL", "OBJ", "DXF", "SVG"]
+
+        return f"Formats: Import ({', '.join(common_import)}), Export ({', '.join(common_export)})"
+    except Exception:
+        pass
+    return ""
 
 
 def build_context() -> str:
@@ -18,10 +231,28 @@ def build_context() -> str:
     """
     lines = []
 
+    # === ENVIRONMENT CONTEXT (always show) ===
+    env_context = _get_environment_context()
+    if env_context:
+        lines.append(f"## Environment: {env_context}")
+
+    # Available tools for current workbench
+    tools = _get_workbench_tools()
+    if tools:
+        lines.append(tools)
+
+    # Other open documents
+    other_docs = _get_open_documents()
+    if other_docs:
+        lines.append(other_docs)
+
+    lines.append("")  # Blank line before document section
+
     # Document info
     doc = FreeCAD.ActiveDocument
     if doc is None:
-        return "No active document. A new document will be created."
+        lines.append("No active document. A new document will be created.")
+        return "\n".join(lines)
 
     lines.append(f"## Document: {doc.Name}")
 
@@ -149,17 +380,58 @@ def build_context() -> str:
             if len(visible_other) > 5:
                 lines.append(f"  ... and {len(visible_other) - 5} more objects")
 
-    # Selection info (important for context)
-    try:
-        selection = FreeCADGui.Selection.getSelection()
-        if selection:
-            lines.append(f"\n### Currently Selected:")
-            for obj in selection[:3]:
-                lines.append(f"  - {obj.Label} ({obj.TypeId})")
-            if len(selection) > 3:
-                lines.append(f"  ... and {len(selection) - 3} more selected")
-    except Exception:
-        pass
+    # Selection info (important for context) - detailed with sub-elements
+    selection_details = _get_selection_details()
+    if selection_details:
+        lines.append(f"\n### {selection_details}")
+    else:
+        # Fallback to basic selection
+        try:
+            selection = FreeCADGui.Selection.getSelection()
+            if selection:
+                lines.append(f"\n### Currently Selected:")
+                for obj in selection[:3]:
+                    lines.append(f"  - {obj.Label} ({obj.TypeId})")
+                if len(selection) > 3:
+                    lines.append(f"  ... and {len(selection) - 3} more selected")
+        except Exception:
+            pass
+
+    # === NEW CONTEXT SOURCES ===
+
+    # Expressions (parametric relationships - the "code" of CAD)
+    expressions = _extract_expressions(objects)
+    if expressions:
+        lines.append(_describe_expressions(expressions))
+
+    # Dependency graph (object relationships)
+    dep_graph = _build_dependency_graph(objects)
+    dep_desc = _describe_dependency_graph(dep_graph)
+    if dep_desc:
+        lines.append(dep_desc)
+
+    # Spreadsheet parameters (named variables)
+    spreadsheet_params = _extract_spreadsheet_params(objects)
+    if spreadsheet_params:
+        lines.append(_describe_spreadsheet_params(spreadsheet_params))
+
+    # Detailed sketch constraints (only for selected or recent sketches)
+    if sketches:
+        constraint_details = []
+        sketches_to_detail = sketches[:3]  # Only detail first 3 sketches
+        for sketch in sketches_to_detail:
+            constraint_str = _format_sketch_constraints(sketch)
+            if constraint_str:
+                constraint_details.append(f"  {sketch.Label}:\n{constraint_str}")
+
+        if constraint_details:
+            lines.append("\n### Sketch Constraint Details:")
+            lines.extend(constraint_details)
+
+    # Console errors (recent issues)
+    console_errors = _get_console_errors()
+    if console_errors:
+        lines.append(_describe_console_errors(console_errors))
 
     return "\n".join(lines)
 
@@ -537,6 +809,272 @@ def _describe_generic_object(obj) -> str:
         pass
 
     return " ".join(parts)
+
+
+def _extract_expressions(objects) -> list:
+    """Extract expressions (parametric relationships) from all objects.
+
+    Expressions are like "code" in CAD - they define how parameters depend on each other.
+    Example: Box.Height = Spreadsheet.A1 * 2
+    """
+    expressions = []
+
+    for obj in objects:
+        try:
+            # ExpressionEngine contains all expressions for an object
+            if hasattr(obj, "ExpressionEngine") and obj.ExpressionEngine:
+                for prop, expr in obj.ExpressionEngine:
+                    expressions.append({
+                        "object": obj.Label,
+                        "property": prop,
+                        "expression": expr
+                    })
+        except Exception:
+            pass
+
+    return expressions
+
+
+def _describe_expressions(expressions) -> str:
+    """Format expressions for context output."""
+    if not expressions:
+        return ""
+
+    lines = ["\n### Expressions (Parametric Relationships):"]
+    for expr in expressions[:15]:  # Limit to 15 expressions
+        lines.append(f"  - {expr['object']}.{expr['property']} = {expr['expression']}")
+
+    if len(expressions) > 15:
+        lines.append(f"  ... and {len(expressions) - 15} more expressions")
+
+    return "\n".join(lines)
+
+
+def _describe_sketch_constraints_detailed(sketch) -> list:
+    """Extract detailed constraint information from a sketch.
+
+    Returns list of constraint descriptions showing design intent.
+    """
+    constraints = []
+
+    try:
+        if not hasattr(sketch, "Constraints"):
+            return constraints
+
+        for i, c in enumerate(sketch.Constraints):
+            constraint_info = {
+                "type": c.Type,
+                "name": c.Name if c.Name else f"Constraint{i}",
+            }
+
+            # Add value for dimensional constraints
+            if c.Type in ("Distance", "DistanceX", "DistanceY", "Radius", "Diameter", "Angle"):
+                constraint_info["value"] = c.Value
+
+            # Add references
+            if c.First >= 0:
+                constraint_info["first"] = c.First
+            if hasattr(c, "Second") and c.Second >= 0:
+                constraint_info["second"] = c.Second
+
+            constraints.append(constraint_info)
+
+    except Exception:
+        pass
+
+    return constraints
+
+
+def _format_sketch_constraints(sketch) -> str:
+    """Format sketch constraints for context."""
+    constraints = _describe_sketch_constraints_detailed(sketch)
+    if not constraints:
+        return ""
+
+    lines = []
+
+    # Group by type
+    constraint_types = {}
+    for c in constraints:
+        ctype = c["type"]
+        if ctype not in constraint_types:
+            constraint_types[ctype] = []
+        constraint_types[ctype].append(c)
+
+    # Format
+    for ctype, clist in constraint_types.items():
+        if ctype in ("Distance", "DistanceX", "DistanceY"):
+            values = [f"{c.get('value', 0):.1f}mm" for c in clist]
+            lines.append(f"    {ctype}: {', '.join(values[:5])}")
+        elif ctype in ("Radius", "Diameter"):
+            values = [f"{c.get('value', 0):.1f}mm" for c in clist]
+            lines.append(f"    {ctype}: {', '.join(values[:5])}")
+        elif ctype == "Angle":
+            values = [f"{c.get('value', 0):.1f}°" for c in clist]
+            lines.append(f"    Angle: {', '.join(values[:5])}")
+        else:
+            # Geometric constraints (Horizontal, Vertical, Coincident, etc.)
+            lines.append(f"    {ctype}: {len(clist)}")
+
+    return "\n".join(lines)
+
+
+def _build_dependency_graph(objects) -> dict:
+    """Build dependency graph showing object relationships.
+
+    InList = objects that depend on this object (downstream)
+    OutList = objects this object depends on (upstream)
+    """
+    graph = {
+        "dependencies": [],  # object -> depends on
+        "dependents": []     # object -> used by
+    }
+
+    for obj in objects:
+        try:
+            # Skip internal objects
+            if _is_internal_object(obj):
+                continue
+
+            # OutList: what does this object depend on?
+            if hasattr(obj, "OutList") and obj.OutList:
+                deps = [o.Label for o in obj.OutList if not _is_internal_object(o)]
+                if deps:
+                    graph["dependencies"].append({
+                        "object": obj.Label,
+                        "depends_on": deps
+                    })
+
+            # InList: what depends on this object?
+            if hasattr(obj, "InList") and obj.InList:
+                dependents = [o.Label for o in obj.InList if not _is_internal_object(o)]
+                if dependents:
+                    graph["dependents"].append({
+                        "object": obj.Label,
+                        "used_by": dependents
+                    })
+
+        except Exception:
+            pass
+
+    return graph
+
+
+def _describe_dependency_graph(graph) -> str:
+    """Format dependency graph for context."""
+    if not graph["dependencies"] and not graph["dependents"]:
+        return ""
+
+    lines = ["\n### Dependencies:"]
+
+    # Show key dependencies
+    shown = set()
+    for dep in graph["dependencies"][:10]:
+        obj = dep["object"]
+        deps = dep["depends_on"]
+        if obj not in shown:
+            lines.append(f"  - {obj} ← depends on: {', '.join(deps[:3])}")
+            shown.add(obj)
+
+    if len(graph["dependencies"]) > 10:
+        lines.append(f"  ... and {len(graph['dependencies']) - 10} more dependency chains")
+
+    return "\n".join(lines)
+
+
+def _extract_spreadsheet_params(objects) -> list:
+    """Extract named parameters from Spreadsheet objects.
+
+    Spreadsheets are often used as parameter tables in parametric designs.
+    """
+    params = []
+
+    for obj in objects:
+        try:
+            if obj.TypeId == "Spreadsheet::Sheet":
+                # Get cells with aliases (named parameters)
+                if hasattr(obj, "getCellFromAlias"):
+                    # Try to get all aliases by checking common ranges
+                    for row in range(1, 100):  # Check first 100 rows
+                        for col_idx, col in enumerate("ABCDEFGH"):  # Check columns A-H
+                            cell = f"{col}{row}"
+                            try:
+                                alias = obj.getAlias(cell)
+                                if alias:
+                                    value = obj.get(cell)
+                                    params.append({
+                                        "spreadsheet": obj.Label,
+                                        "cell": cell,
+                                        "alias": alias,
+                                        "value": str(value) if value is not None else ""
+                                    })
+                            except Exception:
+                                pass
+
+                        # Stop if we've found enough or row is empty
+                        if len(params) > 50:
+                            break
+
+        except Exception:
+            pass
+
+    return params
+
+
+def _describe_spreadsheet_params(params) -> str:
+    """Format spreadsheet parameters for context."""
+    if not params:
+        return ""
+
+    lines = ["\n### Spreadsheet Parameters:"]
+
+    # Group by spreadsheet
+    by_sheet = {}
+    for p in params:
+        sheet = p["spreadsheet"]
+        if sheet not in by_sheet:
+            by_sheet[sheet] = []
+        by_sheet[sheet].append(p)
+
+    for sheet, sheet_params in by_sheet.items():
+        lines.append(f"  {sheet}:")
+        for p in sheet_params[:10]:
+            lines.append(f"    - {p['alias']} = {p['value']} ({p['cell']})")
+        if len(sheet_params) > 10:
+            lines.append(f"    ... and {len(sheet_params) - 10} more parameters")
+
+    return "\n".join(lines)
+
+
+def _get_console_errors() -> list:
+    """Get recent console errors and warnings.
+
+    Useful for AI to understand what issues the user might be facing.
+    Returns list of (type, message) tuples.
+    """
+    # Get messages from buffer, filter to errors and warnings
+    buffer = get_console_buffer()
+
+    # Only return errors and warnings, prioritize recent ones
+    errors = [(t, m) for t, m in buffer if t in ("error", "warning")]
+
+    # Return last 10 errors/warnings
+    return errors[-10:] if len(errors) > 10 else errors
+
+
+def _describe_console_errors(errors) -> str:
+    """Format console errors for context."""
+    if not errors:
+        return ""
+
+    lines = ["\n### Recent Console Issues:"]
+    for err_type, msg in errors:
+        prefix = "ERROR" if err_type == "error" else "WARN"
+        # Truncate long messages
+        display_msg = msg[:100] + "..." if len(msg) > 100 else msg
+        lines.append(f"  [{prefix}] {display_msg}")
+
+    return "\n".join(lines)
 
 
 def get_selected_objects() -> list:

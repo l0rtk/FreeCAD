@@ -58,6 +58,9 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         # Session manager for persisting conversations
         self.session_manager = SessionManager()
 
+        # Start console observer to capture errors for AI context
+        ContextBuilder.start_console_observer()
+
         self._setup_ui()
         self._connect_signals()
 
@@ -539,3 +542,9 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         if current_id:
             # Reload current session with new debug mode setting
             self._on_load_session(current_id)
+
+    def closeEvent(self, event):
+        """Clean up when panel is closed."""
+        # Stop the console observer
+        ContextBuilder.stop_console_observer()
+        super().closeEvent(event)
