@@ -221,8 +221,11 @@ class SessionManager:
                 messages = data.get("messages", [])
                 llm_requests = data.get("llm_requests", [])
 
+                FreeCAD.Console.PrintMessage(f"AIAssistant: load_session - {len(messages)} messages, {len(llm_requests)} llm_requests\n")
+
                 # Match assistant messages with their debug info from llm_requests
                 llm_request_idx = 0
+                debug_attached = 0
                 for msg in messages:
                     if msg.get("role") == "assistant" and llm_request_idx < len(llm_requests):
                         req = llm_requests[llm_request_idx]
@@ -236,7 +239,9 @@ class SessionManager:
                             "user_message": req.get("request", {}).get("user_message", ""),
                         }
                         llm_request_idx += 1
+                        debug_attached += 1
 
+                FreeCAD.Console.PrintMessage(f"AIAssistant: load_session - attached debug_info to {debug_attached} assistant messages\n")
                 return messages
         except Exception as e:
             FreeCAD.Console.PrintError(f"AIAssistant: Failed to load session: {e}\n")

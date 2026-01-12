@@ -317,6 +317,7 @@ class MessageBubbleWidget(QtWidgets.QFrame):
     }
 
     def __init__(self, message: ChatMessage, parent=None, debug_info: dict = None):
+        import FreeCAD
         super().__init__(parent)
         self._message = message
         self._code_widgets = []
@@ -325,7 +326,9 @@ class MessageBubbleWidget(QtWidgets.QFrame):
         self._setup_ui()
 
         # Add debug info if provided
+        FreeCAD.Console.PrintMessage(f"AIAssistant: MessageBubbleWidget role={message.role}, debug_info={debug_info is not None}\n")
         if debug_info:
+            FreeCAD.Console.PrintMessage("AIAssistant: Adding debug_info to bubble\n")
             self.add_debug_info(debug_info)
 
     def _setup_ui(self):

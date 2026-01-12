@@ -65,6 +65,9 @@ class ChatListWidget(QtWidgets.QScrollArea):
 
     def add_message(self, text: str, role: str, debug_info: dict = None) -> int:
         """Add a new message to the chat."""
+        import FreeCAD
+        FreeCAD.Console.PrintMessage(f"AIAssistant: ChatListWidget.add_message role={role}, debug_info={debug_info is not None}\n")
+
         # Add to model
         row = self._model.add_message(text, role)
 
@@ -352,12 +355,15 @@ class ChatWidget(QtWidgets.QWidget):
 
     def add_assistant_message(self, text: str, stream: bool = True, debug_info: dict = None):
         """Add an assistant message, optionally with streaming."""
+        import FreeCAD
+        FreeCAD.Console.PrintMessage(f"AIAssistant: add_assistant_message stream={stream}, debug_info={debug_info is not None}\n")
         if stream:
             # For streaming, store debug_info to add after streaming completes
             self._pending_debug_info = debug_info
             self._streaming_row = self._chat_list.add_streaming_message(MessageRole.ASSISTANT)
             self._streaming_controller.start_streaming(text)
         else:
+            FreeCAD.Console.PrintMessage(f"AIAssistant: Calling add_message with debug_info={debug_info is not None}\n")
             self._chat_list.add_message(text, MessageRole.ASSISTANT, debug_info=debug_info)
 
     def add_system_message(self, text: str):
@@ -370,16 +376,21 @@ class ChatWidget(QtWidgets.QWidget):
 
     def add_message_from_dict(self, msg_dict: dict, show_debug: bool = False):
         """Load a message from session JSON."""
+        import FreeCAD
         role = msg_dict.get("role", "system")
         text = msg_dict.get("text", "")
+
+        # Skip system messages - they're UI feedback and shouldn't be reloaded
+        if role == MessageRole.SYSTEM:
+            return
+
         debug_info = msg_dict.get("debug_info") if show_debug else None
+        FreeCAD.Console.PrintMessage(f"AIAssistant: add_message_from_dict role={role}, show_debug={show_debug}, has_debug_info={debug_info is not None}\n")
 
         if role == MessageRole.USER:
             self.add_user_message(text)
         elif role == MessageRole.ASSISTANT:
             self.add_assistant_message(text, stream=False, debug_info=debug_info)
-        elif role == MessageRole.SYSTEM:
-            self.add_system_message(text)
         elif role == MessageRole.ERROR:
             self.add_error_message(text)
 

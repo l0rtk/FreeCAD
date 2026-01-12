@@ -210,6 +210,7 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self.debug_action = menu.addAction("Debug mode")
         self.debug_action.setCheckable(True)
         self.debug_action.setChecked(False)
+        self.debug_action.toggled.connect(self._on_debug_toggled)
 
         menu.addSeparator()
 
@@ -326,7 +327,11 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
             pass  # Already disconnected
 
         show_debug = self.debug_action.isChecked()
+        FreeCAD.Console.PrintMessage(f"AIAssistant: Loading session {session_id}, {len(messages)} messages, show_debug={show_debug}\n")
+
         for i, msg in enumerate(messages):
+            has_debug = "debug_info" in msg and msg["debug_info"] is not None
+            FreeCAD.Console.PrintMessage(f"AIAssistant: Loading msg {i}, role={msg.get('role')}, has_debug_info={has_debug}\n")
             self._chat.add_message_from_dict(msg, show_debug=show_debug)
             # Process events every 5 messages to keep UI responsive
             if i % 5 == 0:
@@ -336,8 +341,6 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self._chat._chat_list._model.message_added.connect(
             self.session_manager.save_message
         )
-
-        self._chat.add_system_message(f"Loaded session ({len(messages)} messages)")
 
     def _open_sessions_folder(self):
         """Open the sessions folder in file manager."""
@@ -469,3 +472,11 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self._on_clear()
         self.session_manager.clear_current_session()
         self._chat.add_system_message("Conversation cleared - new session started")
+
+    def _on_debug_toggled(self, checked: bool):
+        """Handle debug mode toggle - reload current session to show/hide debug info."""
+        current_id = self.session_manager.get_current_session_id()
+        FreeCAD.Console.PrintMessage(f"AIAssistant: Debug toggled to {checked}, current_session={current_id}\n")
+        if current_id:
+            # Reload current session with new debug mode setting
+            self._on_load_session(current_id)
