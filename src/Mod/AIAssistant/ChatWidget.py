@@ -63,14 +63,14 @@ class ChatListWidget(QtWidgets.QScrollArea):
 
         self.setWidget(self._container)
 
-    def add_message(self, text: str, role: str) -> int:
+    def add_message(self, text: str, role: str, debug_info: dict = None) -> int:
         """Add a new message to the chat."""
         # Add to model
         row = self._model.add_message(text, role)
 
         # Create widget
         message = self._model.get_message(row)
-        widget = MessageBubbleWidget(message)
+        widget = MessageBubbleWidget(message, debug_info=debug_info)
         widget.runCodeRequested.connect(self.runCodeRequested.emit)
 
         # Insert before the stretch
@@ -221,6 +221,7 @@ class ChatWidget(QtWidgets.QWidget):
         super().__init__(parent)
         self._streaming_controller = StreamingController(self)
         self._streaming_row = -1
+        self._pending_debug_info = None
         self._setup_ui()
         self._connect_signals()
 
@@ -349,13 +350,15 @@ class ChatWidget(QtWidgets.QWidget):
         """Add a user message programmatically."""
         self._chat_list.add_message(text, MessageRole.USER)
 
-    def add_assistant_message(self, text: str, stream: bool = True):
+    def add_assistant_message(self, text: str, stream: bool = True, debug_info: dict = None):
         """Add an assistant message, optionally with streaming."""
         if stream:
+            # For streaming, store debug_info to add after streaming completes
+            self._pending_debug_info = debug_info
             self._streaming_row = self._chat_list.add_streaming_message(MessageRole.ASSISTANT)
             self._streaming_controller.start_streaming(text)
         else:
-            self._chat_list.add_message(text, MessageRole.ASSISTANT)
+            self._chat_list.add_message(text, MessageRole.ASSISTANT, debug_info=debug_info)
 
     def add_system_message(self, text: str):
         """Add a system message."""
@@ -364,6 +367,20 @@ class ChatWidget(QtWidgets.QWidget):
     def add_error_message(self, text: str):
         """Add an error message."""
         self._chat_list.add_message(text, MessageRole.ERROR)
+
+    def add_message_from_dict(self, msg_dict: dict):
+        """Load a message from session JSON."""
+        role = msg_dict.get("role", "system")
+        text = msg_dict.get("text", "")
+
+        if role == MessageRole.USER:
+            self.add_user_message(text)
+        elif role == MessageRole.ASSISTANT:
+            self.add_assistant_message(text, stream=False)
+        elif role == MessageRole.SYSTEM:
+            self.add_system_message(text)
+        elif role == MessageRole.ERROR:
+            self.add_error_message(text)
 
     def show_typing(self):
         """Show typing indicator."""
@@ -401,6 +418,13 @@ class ChatWidget(QtWidgets.QWidget):
                     message.text,
                     is_complete=True
                 )
+
+            # Add debug info widget if pending
+            if self._pending_debug_info and self._streaming_row < len(self._chat_list._message_widgets):
+                widget = self._chat_list._message_widgets[self._streaming_row]
+                widget.add_debug_info(self._pending_debug_info)
+                self._pending_debug_info = None
+
         self._streaming_row = -1
 
     def skip_streaming(self):

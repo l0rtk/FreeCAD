@@ -4,6 +4,9 @@ AI Assistant Panel - Main dock widget for natural language CAD modeling.
 Features a modern Cursor-like chat interface.
 """
 
+import subprocess
+from datetime import datetime
+
 import FreeCAD
 import FreeCADGui
 from PySide6 import QtWidgets, QtCore, QtGui
@@ -86,6 +89,30 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         """)
         header_layout.addWidget(title)
         header_layout.addStretch()
+
+        # Sessions button
+        self.sessions_btn = QtWidgets.QToolButton()
+        self.sessions_btn.setText("Sessions")
+        self.sessions_btn.setToolTip("View and switch sessions")
+        self.sessions_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
+        self.sessions_btn.setStyleSheet("""
+            QToolButton {
+                color: #888;
+                background: transparent;
+                border: none;
+                font-size: 12px;
+                padding: 4px 8px;
+            }
+            QToolButton:hover {
+                color: #e0e0e0;
+                background-color: #333;
+                border-radius: 4px;
+            }
+            QToolButton::menu-indicator {
+                image: none;
+            }
+        """)
+        header_layout.addWidget(self.sessions_btn)
 
         # Settings button
         self.settings_btn = QtWidgets.QToolButton()
@@ -180,6 +207,10 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self.streaming_action.setCheckable(True)
         self.streaming_action.setChecked(True)
 
+        self.debug_action = menu.addAction("Debug mode")
+        self.debug_action.setCheckable(True)
+        self.debug_action.setChecked(False)
+
         menu.addSeparator()
 
         clear_history = menu.addAction("Clear conversation history")
@@ -196,6 +227,123 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self._chat._chat_list._model.message_added.connect(
             self.session_manager.save_message
         )
+
+        # Setup sessions menu - use aboutToShow to refresh before displaying
+        self._sessions_menu = QtWidgets.QMenu(self)
+        self._sessions_menu.aboutToShow.connect(self._refresh_sessions_menu)
+        self.sessions_btn.setMenu(self._sessions_menu)
+
+    def _refresh_sessions_menu(self):
+        """Refresh the sessions dropdown menu."""
+        menu = self._sessions_menu
+        menu.clear()
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #2d2d2d;
+                color: #e0e0e0;
+                border: 1px solid #444;
+                border-radius: 4px;
+                padding: 4px;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #3d3d3d;
+            }
+            QMenu::separator {
+                height: 1px;
+                background-color: #444;
+                margin: 4px 8px;
+            }
+        """)
+
+        new_session = menu.addAction("+ New Session")
+        new_session.triggered.connect(self._on_new_session)
+        menu.addSeparator()
+
+        # List recent sessions
+        sessions = self.session_manager.list_sessions()[:10]
+        current_id = self.session_manager.get_current_session_id()
+
+        if sessions:
+            for session in sessions:
+                label = self._format_session_item(session)
+                if session["session_id"] == current_id:
+                    label = "● " + label
+                action = menu.addAction(label)
+                action.setData(session["session_id"])
+                # Use default argument to capture session value
+                action.triggered.connect(
+                    lambda checked, sid=session["session_id"]: self._on_load_session(sid)
+                )
+        else:
+            no_sessions = menu.addAction("No sessions yet")
+            no_sessions.setEnabled(False)
+
+        menu.addSeparator()
+        open_folder = menu.addAction("Open sessions folder...")
+        open_folder.triggered.connect(self._open_sessions_folder)
+
+    def _format_session_item(self, session):
+        """Format session for display in menu."""
+        try:
+            created = datetime.fromisoformat(session["created"])
+            now = datetime.now()
+
+            if created.date() == now.date():
+                date_str = created.strftime("Today %H:%M")
+            elif created.date() == (now.date().replace(day=now.day - 1)):
+                date_str = created.strftime("Yesterday %H:%M")
+            else:
+                date_str = created.strftime("%b %d %H:%M")
+
+            preview = session.get("preview", "")[:30]
+            if preview:
+                return f"{date_str} - {preview}"
+            return date_str
+        except Exception:
+            return session["session_id"]
+
+    def _on_new_session(self):
+        """Start a new session."""
+        self._on_clear()
+        self.session_manager.clear_current_session()
+        self._chat.add_system_message("New session started")
+
+    def _on_load_session(self, session_id):
+        """Load a previous session."""
+        messages = self.session_manager.load_session(session_id)
+        self._chat.clear_chat()
+
+        # Temporarily disconnect to avoid re-saving loaded messages
+        try:
+            self._chat._chat_list._model.message_added.disconnect(
+                self.session_manager.save_message
+            )
+        except RuntimeError:
+            pass  # Already disconnected
+
+        for i, msg in enumerate(messages):
+            self._chat.add_message_from_dict(msg)
+            # Process events every 5 messages to keep UI responsive
+            if i % 5 == 0:
+                QtCore.QCoreApplication.processEvents()
+
+        # Reconnect the signal
+        self._chat._chat_list._model.message_added.connect(
+            self.session_manager.save_message
+        )
+
+        self._chat.add_system_message(f"Loaded session ({len(messages)} messages)")
+
+    def _open_sessions_folder(self):
+        """Open the sessions folder in file manager."""
+        try:
+            subprocess.run(["xdg-open", str(self.session_manager._sessions_dir)])
+        except Exception as e:
+            FreeCAD.Console.PrintError(f"Failed to open sessions folder: {e}\n")
 
     def _on_send(self, user_input: str):
         """Handle message submission."""
@@ -248,9 +396,20 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
             success=True
         )
 
+        # Build debug info if debug mode enabled
+        debug_info = None
+        if self.debug_action.isChecked():
+            debug_info = {
+                "duration_ms": self.llm.last_duration_ms,
+                "model": self.llm.model,
+                "context_length": len(self.llm.last_context),
+                "system_prompt": self.llm.last_system_prompt,
+                "context": self.llm.last_context,
+            }
+
         # Display response with or without streaming
         use_streaming = self.streaming_action.isChecked()
-        self._chat.add_assistant_message(response, stream=use_streaming)
+        self._chat.add_assistant_message(response, stream=use_streaming, debug_info=debug_info)
 
         self.pending_input = None
 

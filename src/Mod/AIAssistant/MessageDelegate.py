@@ -28,6 +28,166 @@ class AvatarWidget(QtWidgets.QLabel):
         """)
 
 
+class DebugInfoWidget(QtWidgets.QWidget):
+    """Collapsible debug info panel for LLM requests."""
+
+    def __init__(self, debug_info: dict, parent=None):
+        super().__init__(parent)
+        self._debug_info = debug_info
+        self._expanded = False
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(4)
+
+        # Toggle button
+        self._toggle_btn = QtWidgets.QPushButton("▶ Debug Info")
+        self._toggle_btn.setFlat(True)
+        self._toggle_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self._toggle_btn.setStyleSheet("""
+            QPushButton {
+                color: #6b7280;
+                font-size: 11px;
+                text-align: left;
+                padding: 4px 8px;
+                background: transparent;
+                border: none;
+            }
+            QPushButton:hover {
+                color: #9ca3af;
+            }
+        """)
+        self._toggle_btn.clicked.connect(self._toggle)
+        layout.addWidget(self._toggle_btn)
+
+        # Content (hidden by default)
+        self._content = QtWidgets.QFrame()
+        self._content.setVisible(False)
+        self._content.setStyleSheet("""
+            QFrame {
+                background-color: rgba(0, 0, 0, 0.3);
+                border-radius: 8px;
+                border: 1px solid #30363d;
+            }
+        """)
+        content_layout = QtWidgets.QVBoxLayout(self._content)
+        content_layout.setContentsMargins(12, 10, 12, 10)
+        content_layout.setSpacing(6)
+
+        # Stats
+        duration = self._debug_info.get('duration_ms', 0)
+        model = self._debug_info.get('model', 'unknown')
+        context_len = self._debug_info.get('context_length', 0)
+
+        stats_text = f"Duration: {duration:.0f}ms  |  Model: {model}  |  Context: {context_len} chars"
+        stats_label = QtWidgets.QLabel(stats_text)
+        stats_label.setStyleSheet("""
+            QLabel {
+                color: #9ca3af;
+                font-size: 11px;
+                font-family: monospace;
+                background: transparent;
+            }
+        """)
+        content_layout.addWidget(stats_label)
+
+        # Buttons to show full data
+        btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.setSpacing(8)
+
+        prompt_btn = QtWidgets.QPushButton("System Prompt")
+        prompt_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        prompt_btn.setStyleSheet(self._button_style())
+        prompt_btn.clicked.connect(
+            lambda: self._show_text("System Prompt", self._debug_info.get("system_prompt", ""))
+        )
+        btn_layout.addWidget(prompt_btn)
+
+        context_btn = QtWidgets.QPushButton("Context")
+        context_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        context_btn.setStyleSheet(self._button_style())
+        context_btn.clicked.connect(
+            lambda: self._show_text("Document Context", self._debug_info.get("context", ""))
+        )
+        btn_layout.addWidget(context_btn)
+
+        btn_layout.addStretch()
+        content_layout.addLayout(btn_layout)
+
+        layout.addWidget(self._content)
+
+    def _button_style(self):
+        return """
+            QPushButton {
+                background-color: #21262d;
+                color: #c9d1d9;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                padding: 4px 12px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #30363d;
+                border-color: #484f58;
+            }
+        """
+
+    def _toggle(self):
+        self._expanded = not self._expanded
+        self._content.setVisible(self._expanded)
+        self._toggle_btn.setText("▼ Debug Info" if self._expanded else "▶ Debug Info")
+
+    def _show_text(self, title: str, text: str):
+        """Show full text in a dialog."""
+        dialog = QtWidgets.QDialog(self.window())
+        dialog.setWindowTitle(title)
+        dialog.resize(700, 500)
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #1a1a1a;
+            }
+        """)
+
+        layout = QtWidgets.QVBoxLayout(dialog)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        text_edit = QtWidgets.QPlainTextEdit(text)
+        text_edit.setReadOnly(True)
+        text_edit.setStyleSheet("""
+            QPlainTextEdit {
+                background-color: #0d1117;
+                color: #c9d1d9;
+                border: 1px solid #30363d;
+                border-radius: 8px;
+                font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+                font-size: 12px;
+                padding: 12px;
+            }
+        """)
+        layout.addWidget(text_edit)
+
+        close_btn = QtWidgets.QPushButton("Close")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #21262d;
+                color: #c9d1d9;
+                border: 1px solid #30363d;
+                border-radius: 6px;
+                padding: 8px 24px;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #30363d;
+            }
+        """)
+        close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn, alignment=QtCore.Qt.AlignRight)
+
+        dialog.exec()
+
+
 class MessageBubbleWidget(QtWidgets.QFrame):
     """Widget representing a single message bubble."""
 
@@ -77,11 +237,17 @@ class MessageBubbleWidget(QtWidgets.QFrame):
         }
     }
 
-    def __init__(self, message: ChatMessage, parent=None):
+    def __init__(self, message: ChatMessage, parent=None, debug_info: dict = None):
         super().__init__(parent)
         self._message = message
         self._code_widgets = []
+        self._content_frame = None
+        self._content_layout = None
         self._setup_ui()
+
+        # Add debug info if provided
+        if debug_info:
+            self.add_debug_info(debug_info)
 
     def _setup_ui(self):
         """Build the bubble UI."""
@@ -119,8 +285,8 @@ class MessageBubbleWidget(QtWidgets.QFrame):
         main_layout.addWidget(avatar, alignment=QtCore.Qt.AlignTop)
 
         # Content container
-        content_frame = QtWidgets.QFrame()
-        content_frame.setStyleSheet(f"""
+        self._content_frame = QtWidgets.QFrame()
+        self._content_frame.setStyleSheet(f"""
             QFrame {{
                 background: {colors['bg']};
                 border-radius: 16px;
@@ -128,9 +294,9 @@ class MessageBubbleWidget(QtWidgets.QFrame):
             }}
         """)
 
-        content_layout = QtWidgets.QVBoxLayout(content_frame)
-        content_layout.setContentsMargins(14, 10, 14, 12)
-        content_layout.setSpacing(8)
+        self._content_layout = QtWidgets.QVBoxLayout(self._content_frame)
+        self._content_layout.setContentsMargins(14, 10, 14, 12)
+        self._content_layout.setSpacing(8)
 
         # Role label (name) - only if not empty
         if colors['name_text']:
@@ -144,15 +310,21 @@ class MessageBubbleWidget(QtWidgets.QFrame):
                     border: none;
                 }}
             """)
-            content_layout.addWidget(name_label)
+            self._content_layout.addWidget(name_label)
 
         # Parse and display content
-        self._render_content(content_layout, colors)
+        self._render_content(self._content_layout, colors)
 
-        main_layout.addWidget(content_frame, stretch=1)
+        main_layout.addWidget(self._content_frame, stretch=1)
 
         # Add spacer on the right for user messages to push content left
         # (or we could right-align user messages, but keeping consistent for now)
+
+    def add_debug_info(self, debug_info: dict):
+        """Add debug info widget to the message."""
+        if self._content_layout and self._message.role == MessageRole.ASSISTANT:
+            debug_widget = DebugInfoWidget(debug_info)
+            self._content_layout.addWidget(debug_widget)
 
     def _render_content(self, layout: QtWidgets.QVBoxLayout, colors: dict):
         """Render message content with code blocks."""
