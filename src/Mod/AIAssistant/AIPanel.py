@@ -235,6 +235,19 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         # Store the code for later execution
         self._last_code = response
 
+        # Log full request/response for debugging
+        self.session_manager.log_llm_request(
+            user_message=self.pending_input or "",
+            system_prompt=self.llm.last_system_prompt,
+            context=self.llm.last_context,
+            conversation_history=self.llm.last_conversation,
+            response=response,
+            model=self.llm.model,
+            api_url=self.llm.api_url,
+            duration_ms=self.llm.last_duration_ms,
+            success=True
+        )
+
         # Display response with or without streaming
         use_streaming = self.streaming_action.isChecked()
         self._chat.add_assistant_message(response, stream=use_streaming)
@@ -250,6 +263,21 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         """Handle LLM error."""
         self._chat.hide_typing()
         self._chat.set_input_enabled(True)
+
+        # Log failed request for debugging
+        self.session_manager.log_llm_request(
+            user_message=self.pending_input or "",
+            system_prompt=self.llm.last_system_prompt,
+            context=self.llm.last_context,
+            conversation_history=self.llm.last_conversation,
+            response="",
+            model=self.llm.model,
+            api_url=self.llm.api_url,
+            duration_ms=self.llm.last_duration_ms,
+            success=False,
+            error=error_msg
+        )
+
         self._chat.add_error_message(error_msg)
         self.pending_input = None
 

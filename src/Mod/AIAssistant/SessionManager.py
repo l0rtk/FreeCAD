@@ -1,13 +1,14 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """
-Session Manager - Persists chat sessions to local JSON files.
+Session Manager - Persists chat sessions and debug data to local JSON files.
 """
 
 import json
 import os
+import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 import FreeCAD
 
@@ -56,7 +57,8 @@ class SessionManager:
             "created": now.isoformat(),
             "updated": now.isoformat(),
             "document_name": document_name or "",
-            "messages": []
+            "messages": [],
+            "llm_requests": []  # Debug: full LLM request/response data
         }
 
         self._save_current_session()
@@ -97,6 +99,72 @@ class SessionManager:
 
         # Append to current session
         self._current_session_data["messages"].append(message_dict)
+        self._current_session_data["updated"] = datetime.now().isoformat()
+
+        self._save_current_session()
+
+    def log_llm_request(
+        self,
+        user_message: str,
+        system_prompt: str,
+        context: str,
+        conversation_history: List[dict],
+        response: str,
+        model: str = "",
+        api_url: str = "",
+        duration_ms: float = 0,
+        success: bool = True,
+        error: str = ""
+    ) -> None:
+        """
+        Log a complete LLM request/response for debugging.
+
+        Args:
+            user_message: The user's input message
+            system_prompt: Full system prompt sent to LLM
+            context: Document context string
+            conversation_history: Previous messages sent for context
+            response: LLM response (or error message)
+            model: Model name used
+            api_url: API endpoint URL
+            duration_ms: Request duration in milliseconds
+            success: Whether the request succeeded
+            error: Error message if failed
+        """
+        # Auto-create session if none exists
+        if self._current_session_id is None:
+            doc_name = None
+            try:
+                if FreeCAD.ActiveDocument:
+                    doc_name = FreeCAD.ActiveDocument.Name
+            except Exception:
+                pass
+            self.new_session(doc_name)
+
+        # Build debug entry
+        debug_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "request": {
+                "user_message": user_message,
+                "system_prompt": system_prompt,
+                "context": context,
+                "conversation_history": conversation_history,
+                "model": model,
+                "api_url": api_url
+            },
+            "response": {
+                "content": response,
+                "success": success,
+                "error": error,
+                "duration_ms": duration_ms
+            }
+        }
+
+        # Ensure llm_requests exists (for older sessions)
+        if "llm_requests" not in self._current_session_data:
+            self._current_session_data["llm_requests"] = []
+
+        self._current_session_data["llm_requests"].append(debug_entry)
         self._current_session_data["updated"] = datetime.now().isoformat()
 
         self._save_current_session()
