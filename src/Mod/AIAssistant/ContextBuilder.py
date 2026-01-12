@@ -7,6 +7,7 @@ Provides detailed information about all objects to help AI understand existing d
 import FreeCAD
 import FreeCADGui
 from collections import deque
+from . import SnapshotManager
 
 
 # Global buffer for console messages (errors and warnings)
@@ -294,7 +295,7 @@ def build_context() -> str:
         else:
             other_objects.append(obj)
 
-    # Summary
+    # Summary (brief counts - detailed info provided by comprehensive context below)
     lines.append(f"\n### Summary: {len(objects)} objects")
     summary_parts = []
     if bodies:
@@ -313,72 +314,6 @@ def build_context() -> str:
         summary_parts.append(f"{len(other_objects)} other")
     if summary_parts:
         lines.append(f"  {', '.join(summary_parts)}")
-
-    # Bodies with their feature trees
-    if bodies:
-        lines.append("\n### Bodies:")
-        for body in bodies[:5]:
-            lines.append(_describe_body(body))
-        if len(bodies) > 5:
-            lines.append(f"  ... and {len(bodies) - 5} more bodies")
-
-    # Part primitives (Box, Cylinder, Sphere, etc.)
-    if part_primitives:
-        lines.append("\n### Part Primitives:")
-        for obj in part_primitives[:10]:
-            lines.append(_describe_part_primitive(obj))
-        if len(part_primitives) > 10:
-            lines.append(f"  ... and {len(part_primitives) - 10} more primitives")
-
-    # Part features (Boolean operations, etc.)
-    if part_features:
-        lines.append("\n### Part Features:")
-        for obj in part_features[:5]:
-            lines.append(_describe_part_feature(obj))
-        if len(part_features) > 5:
-            lines.append(f"  ... and {len(part_features) - 5} more features")
-
-    # Sketches
-    if sketches:
-        lines.append("\n### Sketches:")
-        for obj in sketches[:5]:
-            lines.append(_describe_sketch(obj))
-        if len(sketches) > 5:
-            lines.append(f"  ... and {len(sketches) - 5} more sketches")
-
-    # PartDesign features (standalone, not in bodies)
-    standalone_pd = [f for f in partdesign_features if not _is_in_body(f)]
-    if standalone_pd:
-        lines.append("\n### PartDesign Features:")
-        for obj in standalone_pd[:5]:
-            lines.append(_describe_partdesign_feature(obj))
-
-    # Arch structures
-    if arch_structures:
-        lines.append("\n### Architectural Structures:")
-        for obj in arch_structures[:10]:
-            lines.append(_describe_arch_structure(obj))
-        if len(arch_structures) > 10:
-            lines.append(f"  ... and {len(arch_structures) - 10} more structures")
-
-    # Arch walls
-    if arch_walls:
-        lines.append("\n### Walls:")
-        for obj in arch_walls[:10]:
-            lines.append(_describe_arch_wall(obj))
-        if len(arch_walls) > 10:
-            lines.append(f"  ... and {len(arch_walls) - 10} more walls")
-
-    # Other objects
-    if other_objects:
-        # Filter out origins and internal objects
-        visible_other = [o for o in other_objects if not _is_internal_object(o)]
-        if visible_other:
-            lines.append("\n### Other Objects:")
-            for obj in visible_other[:5]:
-                lines.append(_describe_generic_object(obj))
-            if len(visible_other) > 5:
-                lines.append(f"  ... and {len(visible_other) - 5} more objects")
 
     # Selection info (important for context) - detailed with sub-elements
     selection_details = _get_selection_details()
@@ -432,6 +367,11 @@ def build_context() -> str:
     console_errors = _get_console_errors()
     if console_errors:
         lines.append(_describe_console_errors(console_errors))
+
+    # Comprehensive object data (geometry, volumes, topology from SnapshotManager)
+    comprehensive_context = _get_comprehensive_object_context()
+    if comprehensive_context:
+        lines.append(comprehensive_context)
 
     return "\n".join(lines)
 
@@ -1073,6 +1013,234 @@ def _describe_console_errors(errors) -> str:
         # Truncate long messages
         display_msg = msg[:100] + "..." if len(msg) > 100 else msg
         lines.append(f"  [{prefix}] {display_msg}")
+
+    return "\n".join(lines)
+
+
+def _generate_reconstruction_code(obj, data: dict) -> str:
+    """Generate concise Python code to recreate an object.
+
+    Returns a one-liner that shows how the object could be created/modified.
+    """
+    type_id = obj.TypeId
+    label = data.get('label', obj.Label)
+    props = data.get('properties', {})
+
+    # Arch Structure (columns, beams, slabs)
+    if type_id == "Arch::Structure":
+        length = props.get('Length', {}).get('value', 0)
+        width = props.get('Width', {}).get('value', 0)
+        height = props.get('Height', {}).get('value', 0)
+        if length and width and height:
+            pos = data.get('placement', {}).get('position', {})
+            pos_str = ""
+            if pos.get('x', 0) != 0 or pos.get('y', 0) != 0 or pos.get('z', 0) != 0:
+                pos_str = f"; .Placement.Base=Vector({pos['x']:.0f},{pos['y']:.0f},{pos['z']:.0f})"
+            return f"Arch.makeStructure(length={length:.0f}, width={width:.0f}, height={height:.0f}){pos_str}"
+
+    # Part Box
+    if type_id == "Part::Box":
+        length = props.get('Length', {}).get('value', 0)
+        width = props.get('Width', {}).get('value', 0)
+        height = props.get('Height', {}).get('value', 0)
+        if length and width and height:
+            return f"Part.makeBox({length:.0f}, {width:.0f}, {height:.0f})"
+
+    # Part Cylinder
+    if type_id == "Part::Cylinder":
+        radius = props.get('Radius', {}).get('value', 0)
+        height = props.get('Height', {}).get('value', 0)
+        if radius and height:
+            return f"Part.makeCylinder({radius:.0f}, {height:.0f})"
+
+    # Part Sphere
+    if type_id == "Part::Sphere":
+        radius = props.get('Radius', {}).get('value', 0)
+        if radius:
+            return f"Part.makeSphere({radius:.0f})"
+
+    # Part Cone
+    if type_id == "Part::Cone":
+        radius1 = props.get('Radius1', {}).get('value', 0)
+        radius2 = props.get('Radius2', {}).get('value', 0)
+        height = props.get('Height', {}).get('value', 0)
+        if height:
+            return f"Part.makeCone({radius1:.0f}, {radius2:.0f}, {height:.0f})"
+
+    # Part::Feature with simple vertices (custom shapes like pyramids)
+    if type_id == "Part::Feature":
+        shape = data.get('shape', {})
+        verts = shape.get('vertices', [])
+        topo = shape.get('topology', {})
+
+        # Simple pyramid/tetrahedron detection (5 vertices, 5 faces)
+        if len(verts) == 5 and topo.get('faces') == 5:
+            # Find apex (highest Z) and base vertices
+            sorted_verts = sorted(verts, key=lambda v: v['z'], reverse=True)
+            apex = sorted_verts[0]
+            base_verts = sorted_verts[1:]
+            # Sort base vertices counterclockwise for proper polygon
+            import math
+            cx = sum(v['x'] for v in base_verts) / 4
+            cy = sum(v['y'] for v in base_verts) / 4
+            base_verts.sort(key=lambda v: math.atan2(v['y'] - cy, v['x'] - cx))
+            # Generate executable Python code pattern
+            base_pts = ", ".join([f"V({v['x']:.0f},{v['y']:.0f},{v['z']:.0f})" for v in base_verts])
+            apex_pt = f"V({apex['x']:.0f},{apex['y']:.0f},{apex['z']:.0f})"
+            return f"Pyramid(base=[{base_pts}], apex={apex_pt})"
+
+        # Generic Part::Feature - show vertices for reconstruction
+        if len(verts) <= 12:
+            vert_str = ", ".join([f"V({v['x']:.0f},{v['y']:.0f},{v['z']:.0f})" for v in verts])
+            return f"Part.Shape([{vert_str}])"
+
+    # Arch Wall
+    if type_id == "Arch::Wall":
+        length = props.get('Length', {}).get('value', 0)
+        width = props.get('Width', {}).get('value', 0)
+        height = props.get('Height', {}).get('value', 0)
+        if length and height:
+            return f"Arch.makeWall(None, length={length:.0f}, width={width:.0f}, height={height:.0f})"
+
+    return ""
+
+
+def _get_comprehensive_object_context() -> str:
+    """Get comprehensive object data from SnapshotManager for rich AI context.
+
+    This provides detailed geometry data (positions, dimensions, volumes, topology)
+    that helps the AI understand the exact state of all objects in the document.
+    """
+    doc = FreeCAD.ActiveDocument
+    if not doc:
+        return ""
+
+    lines = ["\n### Comprehensive Object Data:"]
+
+    for obj in doc.Objects:
+        # Skip internal objects
+        if obj.TypeId in ("App::Origin", "App::Plane", "App::Line", "App::Point"):
+            continue
+        if "Origin" in obj.Label:
+            continue
+
+        try:
+            # Capture object data (without BREP to keep it concise)
+            data = SnapshotManager.capture_object_data(obj, include_brep=False)
+
+            # Format object header
+            obj_line = f"  **{data['label']}** ({data['type'].split('::')[-1]})"
+
+            # Position
+            if 'placement' in data:
+                pos = data['placement']['position']
+                if pos['x'] != 0 or pos['y'] != 0 or pos['z'] != 0:
+                    obj_line += f" at ({pos['x']:.0f}, {pos['y']:.0f}, {pos['z']:.0f})"
+
+            lines.append(obj_line)
+
+            # Shape data
+            if 'shape' in data:
+                shape = data['shape']
+                shape_parts = []
+
+                # Bounding box dimensions
+                if 'bounding_box' in shape:
+                    size = shape['bounding_box']['size']
+                    shape_parts.append(f"Size: {size[0]:.0f}×{size[1]:.0f}×{size[2]:.0f}mm")
+
+                # Volume
+                if 'volume_mm3' in shape and shape['volume_mm3'] > 0:
+                    vol = shape['volume_mm3']
+                    if vol >= 1e9:
+                        shape_parts.append(f"Vol: {vol/1e9:.1f}m³")
+                    elif vol >= 1e6:
+                        shape_parts.append(f"Vol: {vol/1e6:.1f}L")
+                    else:
+                        shape_parts.append(f"Vol: {vol:.0f}mm³")
+
+                # Surface area
+                if 'surface_area_mm2' in shape and shape['surface_area_mm2'] > 0:
+                    area = shape['surface_area_mm2']
+                    if area >= 1e6:
+                        shape_parts.append(f"Area: {area/1e6:.2f}m²")
+                    else:
+                        shape_parts.append(f"Area: {area:.0f}mm²")
+
+                # Center of mass
+                if 'center_of_mass' in shape:
+                    com = shape['center_of_mass']
+                    shape_parts.append(f"CoM: ({com['x']:.0f}, {com['y']:.0f}, {com['z']:.0f})")
+
+                # Topology
+                if 'topology' in shape:
+                    topo = shape['topology']
+                    shape_parts.append(f"Topo: {topo['faces']}F/{topo['edges']}E/{topo['vertices']}V")
+
+                if shape_parts:
+                    lines.append(f"    {' | '.join(shape_parts)}")
+
+                # Vertex coordinates (for simple objects - enables AI to understand exact geometry)
+                if 'vertices' in shape and len(shape['vertices']) <= 50:
+                    verts = shape['vertices']
+                    # Format compactly: [(x,y,z), ...]
+                    vert_strs = [f"({v['x']:.0f},{v['y']:.0f},{v['z']:.0f})" for v in verts]
+                    lines.append(f"    Vertices: [{', '.join(vert_strs)}]")
+
+            # Key dimensional properties
+            if 'properties' in data:
+                props = data['properties']
+                dim_props = []
+                for name in ['Length', 'Width', 'Height', 'Radius', 'Diameter']:
+                    if name in props and 'value' in props[name]:
+                        val = props[name]['value']
+                        if val > 0:
+                            dim_props.append(f"{name}={val:.0f}mm")
+
+                if dim_props:
+                    lines.append(f"    Props: {', '.join(dim_props)}")
+
+            # Sketch geometry (for Sketcher objects - enables AI to understand 2D profiles)
+            if 'sketch_data' in data:
+                sketch = data['sketch_data']
+                sketch_info = f"Geometry: {sketch.get('geometry_count', 0)}, Constraints: {sketch.get('constraint_count', 0)}"
+                if sketch.get('fully_constrained'):
+                    sketch_info += " (fully constrained)"
+                lines.append(f"    {sketch_info}")
+
+                # Include geometry details for simple sketches
+                if 'geometry' in sketch and len(sketch['geometry']) <= 20:
+                    geom_strs = []
+                    for g in sketch['geometry']:
+                        g_type = g.get('type', 'Unknown')
+                        if 'start' in g and 'end' in g:
+                            geom_strs.append(f"{g_type}({g['start'][0]:.0f},{g['start'][1]:.0f})->({g['end'][0]:.0f},{g['end'][1]:.0f})")
+                        elif 'center' in g and 'radius' in g:
+                            geom_strs.append(f"{g_type}@({g['center'][0]:.0f},{g['center'][1]:.0f}) r={g['radius']:.0f}")
+                        else:
+                            geom_strs.append(g_type)
+                    if geom_strs:
+                        lines.append(f"    Sketch: [{', '.join(geom_strs)}]")
+
+            # Dependencies
+            if 'dependencies' in data:
+                deps = data['dependencies']
+                if deps['depends_on']:
+                    lines.append(f"    Depends on: {', '.join(deps['depends_on'][:3])}")
+                if deps['used_by']:
+                    lines.append(f"    Used by: {', '.join(deps['used_by'][:3])}")
+
+            # Python reconstruction code (helps AI understand how to modify/recreate)
+            py_code = _generate_reconstruction_code(obj, data)
+            if py_code:
+                lines.append(f"    Code: `{py_code}`")
+
+        except Exception as e:
+            # Skip objects that fail to capture
+            continue
+
+    if len(lines) == 1:
+        return ""  # No objects captured
 
     return "\n".join(lines)
 

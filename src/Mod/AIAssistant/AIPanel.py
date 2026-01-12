@@ -16,6 +16,7 @@ FreeCAD.Console.PrintMessage("AIAssistant: AIPanel.py loaded (v2 with session ti
 from . import LLMBackend
 from . import ContextBuilder
 from . import CodeExecutor
+from . import SnapshotManager
 from .ChatWidget import ChatWidget
 from .SessionManager import SessionManager
 
@@ -430,6 +431,15 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         context = ""
         if self.context_action.isChecked():
             context = ContextBuilder.build_context()
+
+        # Capture object snapshot for future context enrichment (unique timestamp per request)
+        from datetime import datetime
+        snapshot_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        snapshot_path = SnapshotManager.save_snapshot(timestamp=snapshot_timestamp)
+
+        # Link snapshot to session
+        if snapshot_path:
+            self.session_manager.add_snapshot_reference(snapshot_timestamp)
 
         # Get conversation history
         conversation = self._chat.get_conversation_history()

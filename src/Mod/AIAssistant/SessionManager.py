@@ -79,14 +79,24 @@ class SessionManager:
         now = datetime.now()
         session_id = now.strftime("%Y-%m-%d_%H-%M-%S")
 
+        # Get document filename if available
+        document_filename = ""
+        try:
+            if FreeCAD.ActiveDocument and FreeCAD.ActiveDocument.FileName:
+                document_filename = FreeCAD.ActiveDocument.FileName
+        except Exception:
+            pass
+
         self._current_session_id = session_id
         self._current_session_data = {
             "session_id": session_id,
             "created": now.isoformat(),
             "updated": now.isoformat(),
             "document_name": document_name or "",
+            "document_filename": document_filename,
             "messages": [],
-            "llm_requests": []  # Debug: full LLM request/response data
+            "llm_requests": [],  # Debug: full LLM request/response data
+            "snapshots": []  # List of snapshot timestamps linked to this session
         }
 
         self._save_current_session()
@@ -277,6 +287,25 @@ class SessionManager:
     def get_current_session_id(self) -> Optional[str]:
         """Get the current active session ID."""
         return self._current_session_id
+
+    def add_snapshot_reference(self, snapshot_timestamp: str) -> None:
+        """
+        Add a snapshot reference to the current session.
+
+        Args:
+            snapshot_timestamp: The timestamp of the snapshot to link.
+        """
+        if self._current_session_id is None:
+            return
+
+        # Ensure snapshots list exists (for older sessions)
+        if "snapshots" not in self._current_session_data:
+            self._current_session_data["snapshots"] = []
+
+        self._current_session_data["snapshots"].append(snapshot_timestamp)
+        self._current_session_data["updated"] = datetime.now().isoformat()
+
+        self._save_current_session()
 
     def delete_session(self, session_id: str) -> bool:
         """
