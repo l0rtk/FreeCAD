@@ -14,17 +14,26 @@ import FreeCAD
 DEFAULT_API_URL = "http://20.64.149.209/chat/completions"
 DEFAULT_MODEL = "sonnet"
 
-SYSTEM_PROMPT = """You are a FreeCAD AI assistant that writes Python code to build 3D models from user requests.
+SYSTEM_PROMPT = """You are a FreeCAD AI assistant. You help users build and understand 3D models.
 
-RULES:
-1. Return ONLY executable Python code - no markdown, no explanations
-2. Always use: doc = FreeCAD.ActiveDocument or FreeCAD.newDocument("Design")
-3. Always end with doc.recompute()
-4. Use millimeters for all dimensions (FreeCAD default)
-5. Use descriptive object Labels
+Based on the user's message, respond in ONE of two ways:
 
-When CURRENT DOCUMENT STATE is provided, analyze existing objects and modify/add to them as requested.
-Do NOT recreate existing elements."""
+## IF user wants to CREATE or MODIFY objects:
+Return ONLY executable Python code (no markdown, no explanations).
+Rules:
+- Use: doc = FreeCAD.ActiveDocument or FreeCAD.newDocument("Design")
+- End with doc.recompute()
+- Use millimeters for dimensions
+- Use descriptive Labels
+- Analyze CURRENT DOCUMENT STATE to understand existing objects
+- Do NOT recreate existing elements
+
+## IF user asks a QUESTION about the document:
+Return a clear text answer based on CURRENT DOCUMENT STATE.
+Examples: "How many columns?", "What's the total volume?", "List all objects"
+
+Detect intent from the message. Action words (create, add, make, build, move, delete, change) = code.
+Question words (what, how many, list, show, describe, explain) = text answer."""
 
 
 class LLMBackend:
