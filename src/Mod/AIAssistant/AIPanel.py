@@ -17,8 +17,10 @@ from . import LLMBackend
 from . import ContextBuilder
 from . import CodeExecutor
 from . import SnapshotManager
+from . import ChangeDetector
 from .ChatWidget import ChatWidget
 from .SessionManager import SessionManager
+from .PreviewManager import PreviewManager
 
 
 class LLMWorker(QtCore.QThread):
@@ -58,6 +60,9 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
 
         # Session manager for persisting conversations
         self.session_manager = SessionManager()
+
+        # Preview manager for 3D previews before execution
+        self._preview_manager = PreviewManager()
 
         # Start console observer to capture errors for AI context
         ContextBuilder.start_console_observer()
@@ -251,6 +256,8 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         """Connect UI signals."""
         self._chat.messageSubmitted.connect(self._on_send)
         self._chat.runCodeRequested.connect(self._on_run_code)
+        self._chat.previewApproved.connect(self._on_preview_approved)
+        self._chat.previewCancelled.connect(self._on_preview_cancelled)
 
         # Connect to session manager for auto-save
         self._chat._chat_list._model.message_added.connect(
@@ -451,7 +458,7 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self.worker.start()
 
     def _on_response(self, response: str):
-        """Handle successful LLM response."""
+        """Handle successful LLM response - create preview."""
         # Hide typing indicator
         self._chat.hide_typing()
         self._chat.set_input_enabled(True)
@@ -472,10 +479,85 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
             success=True
         )
 
+        # Parse description and code from response
+        description, code = self._parse_response(response)
+
+        # If auto-run is enabled, skip preview and execute directly
+        if self.autorun_action.isChecked():
+            # Show traditional code block for auto-run mode
+            self._show_traditional_response(response)
+            QtCore.QTimer.singleShot(500, lambda: self._on_run_code(code))
+            return
+
+        # If no code found, show as regular message
+        if not code.strip():
+            self._show_traditional_response(response)
+            self.pending_input = None
+            return
+
+        # Create preview in temp document
+        FreeCAD.Console.PrintMessage(f"AIAssistant: Creating preview...\n")
+        preview_success = self._preview_manager.create_preview(code)
+
+        if preview_success:
+            # Get preview summary
+            preview_items = self._preview_manager.get_preview_summary()
+            FreeCAD.Console.PrintMessage(f"AIAssistant: Preview created with {len(preview_items)} objects\n")
+
+            # Show preview widget
+            self._chat.add_preview_message(
+                description=description or "I'll create the following objects:",
+                preview_items=preview_items,
+                code=code
+            )
+        else:
+            # Preview failed - fall back to traditional code block
+            FreeCAD.Console.PrintWarning("AIAssistant: Preview failed, showing code block\n")
+            self._preview_manager.clear_preview()
+            self._show_traditional_response(response)
+
+        self.pending_input = None
+
+    def _parse_response(self, response: str) -> tuple:
+        """Parse LLM response to extract description and code.
+
+        Returns:
+            Tuple of (description, code)
+        """
+        import re
+
+        # Try to find Python code block
+        code_match = re.search(r'```python\s*(.*?)\s*```', response, re.DOTALL)
+        if code_match:
+            code = code_match.group(1).strip()
+            # Description is everything before the code block
+            description = response[:code_match.start()].strip()
+            # Clean up description - remove markdown artifacts
+            description = re.sub(r'\n+', ' ', description)
+            description = description.strip()
+            return (description, code)
+
+        # Try to find any code block
+        code_match = re.search(r'```\s*(.*?)\s*```', response, re.DOTALL)
+        if code_match:
+            code = code_match.group(1).strip()
+            description = response[:code_match.start()].strip()
+            description = re.sub(r'\n+', ' ', description)
+            return (description, code)
+
+        # No code block found - might be pure code or pure text
+        # Check if it looks like Python code
+        if 'import FreeCAD' in response or 'Part.' in response or 'doc.addObject' in response:
+            return ("", response.strip())
+
+        # Pure text response
+        return (response.strip(), "")
+
+    def _show_traditional_response(self, response: str):
+        """Show response as traditional code block (for backward compatibility)."""
         # Build debug info if debug mode enabled
         debug_info = None
         if self.debug_action.isChecked():
-            FreeCAD.Console.PrintMessage("AIAssistant: Debug mode ON - building debug info\n")
             debug_info = {
                 "duration_ms": self.llm.last_duration_ms,
                 "model": self.llm.model,
@@ -485,20 +567,10 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
                 "conversation_history": self.llm.last_conversation,
                 "user_message": self.pending_input or "",
             }
-        else:
-            FreeCAD.Console.PrintMessage("AIAssistant: Debug mode OFF\n")
 
         # Display response with or without streaming
         use_streaming = self.streaming_action.isChecked()
-        FreeCAD.Console.PrintMessage(f"AIAssistant: Adding message with streaming={use_streaming}, debug_info={debug_info is not None}\n")
         self._chat.add_assistant_message(response, stream=use_streaming, debug_info=debug_info)
-
-        self.pending_input = None
-
-        # Auto-run if enabled
-        if self.autorun_action.isChecked():
-            # Delay to let streaming complete
-            QtCore.QTimer.singleShot(500, lambda: self._on_run_code(response))
 
     def _on_error(self, error_msg: str):
         """Handle LLM error."""
@@ -522,15 +594,51 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self._chat.add_error_message(error_msg)
         self.pending_input = None
 
+    def _on_preview_approved(self, code: str):
+        """Handle user approval of preview - execute code for real."""
+        FreeCAD.Console.PrintMessage("AIAssistant: Preview approved - executing code\n")
+
+        # Clear the preview objects
+        self._preview_manager.clear_preview()
+
+        # Now execute the code for real and show changes
+        self._on_run_code(code)
+
+    def _on_preview_cancelled(self):
+        """Handle user cancellation of preview."""
+        FreeCAD.Console.PrintMessage("AIAssistant: Preview cancelled\n")
+
+        # Clear the preview objects
+        self._preview_manager.cancel()
+
+        # Add a system message
+        self._chat.add_system_message("Preview cancelled")
+
     def _on_run_code(self, code: str):
-        """Execute the provided code."""
+        """Execute the provided code and display changes."""
         if not code.strip():
             return
 
+        # Capture document state BEFORE execution
+        before_snapshot = SnapshotManager.capture_current_state()
+
+        # Execute the code
         success, message = CodeExecutor.execute(code)
 
+        # Capture document state AFTER execution
+        after_snapshot = SnapshotManager.capture_current_state()
+
+        # Detect changes
+        change_set = ChangeDetector.detect_changes(before_snapshot, after_snapshot, code)
+        change_set.execution_success = success
+        change_set.execution_message = message
+
         if success:
-            self._chat.add_system_message("Code executed successfully")
+            if change_set.is_empty():
+                self._chat.add_system_message("Code executed successfully (no object changes)")
+            else:
+                # Display changes with ChangeWidget
+                self._chat.add_change_message(change_set)
         else:
             self._chat.add_error_message(f"Execution error: {message}")
 

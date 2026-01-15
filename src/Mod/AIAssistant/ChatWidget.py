@@ -6,15 +6,21 @@ Chat Widget - Main chat interface combining message list and input.
 import FreeCAD
 FreeCAD.Console.PrintMessage("AIAssistant: ChatWidget.py loaded (v2 with system filter)\n")
 
+from typing import Union, List, Dict
 from PySide6 import QtWidgets, QtCore, QtGui
 from .MessageModel import ChatMessageModel, ChatMessage, MessageRole
 from .MessageDelegate import MessageBubbleWidget, TypingIndicatorWidget
+from .ChangeDetector import ChangeSet
+from .ChangeWidget import ChangeWidget
+from .PreviewWidget import PreviewWidget
 
 
 class ChatListWidget(QtWidgets.QScrollArea):
     """Scrollable list of chat messages using widgets."""
 
     runCodeRequested = QtCore.Signal(str)
+    previewApproved = QtCore.Signal(str)  # code to execute
+    previewCancelled = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -147,6 +153,75 @@ class ChatListWidget(QtWidgets.QScrollArea):
         """Get conversation history for LLM."""
         return self._model.get_conversation_history()
 
+    def add_change_message(self, change_set: Union[ChangeSet, dict]):
+        """Add a change visualization message."""
+        import FreeCAD
+        FreeCAD.Console.PrintMessage(f"AIAssistant: ChatListWidget.add_change_message\n")
+
+        # Convert to dict if needed for storage
+        changes_dict = change_set.to_dict() if isinstance(change_set, ChangeSet) else change_set
+
+        # Add to model with changes data
+        row = self._model.add_message(
+            text="Changes applied",
+            role=MessageRole.SYSTEM,
+            changes=changes_dict
+        )
+
+        # Create ChangeWidget directly instead of MessageBubbleWidget
+        widget = ChangeWidget(change_set)
+        widget.runCodeRequested.connect(self.runCodeRequested.emit)
+
+        # Insert before the stretch
+        self._layout.insertWidget(self._layout.count() - 1, widget)
+        self._message_widgets.append(widget)
+
+        # Scroll to bottom
+        QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
+
+        return row
+
+    def add_preview_message(self, description: str, preview_items: List[Dict], code: str):
+        """Add a preview message with approve/cancel buttons.
+
+        Args:
+            description: Human-readable description of what will be created
+            preview_items: List of dicts with name, label, type, dimensions
+            code: The Python code to execute on approval
+        """
+        import FreeCAD
+        FreeCAD.Console.PrintMessage(f"AIAssistant: ChatListWidget.add_preview_message - {len(preview_items)} items\n")
+
+        # Add to model
+        row = self._model.add_message(
+            text=description,
+            role=MessageRole.SYSTEM
+        )
+
+        # Create PreviewWidget
+        widget = PreviewWidget(description, preview_items, code)
+        widget.approved.connect(lambda: self._on_preview_approved(code, widget))
+        widget.cancelled.connect(lambda: self._on_preview_cancelled(widget))
+
+        # Insert before the stretch
+        self._layout.insertWidget(self._layout.count() - 1, widget)
+        self._message_widgets.append(widget)
+
+        # Scroll to bottom
+        QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
+
+        return row
+
+    def _on_preview_approved(self, code: str, widget: PreviewWidget):
+        """Handle preview approval."""
+        widget.set_disabled(True)
+        self.previewApproved.emit(code)
+
+    def _on_preview_cancelled(self, widget: PreviewWidget):
+        """Handle preview cancellation."""
+        widget.set_disabled(True)
+        self.previewCancelled.emit()
+
     def _scroll_to_bottom(self):
         """Scroll to the bottom of the chat."""
         scrollbar = self.verticalScrollBar()
@@ -222,6 +297,8 @@ class ChatWidget(QtWidgets.QWidget):
 
     messageSubmitted = QtCore.Signal(str)  # User sends a message
     runCodeRequested = QtCore.Signal(str)  # User wants to run code
+    previewApproved = QtCore.Signal(str)   # User approved preview - code to execute
+    previewCancelled = QtCore.Signal()     # User cancelled preview
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -240,6 +317,8 @@ class ChatWidget(QtWidgets.QWidget):
         # Chat list
         self._chat_list = ChatListWidget()
         self._chat_list.runCodeRequested.connect(self.runCodeRequested.emit)
+        self._chat_list.previewApproved.connect(self.previewApproved.emit)
+        self._chat_list.previewCancelled.connect(self.previewCancelled.emit)
         layout.addWidget(self._chat_list, stretch=1)
 
         # Input area container
@@ -377,13 +456,28 @@ class ChatWidget(QtWidgets.QWidget):
         """Add an error message."""
         self._chat_list.add_message(text, MessageRole.ERROR)
 
+    def add_change_message(self, change_set: Union[ChangeSet, dict]):
+        """Add a change visualization message."""
+        self._chat_list.add_change_message(change_set)
+
+    def add_preview_message(self, description: str, preview_items: List[Dict], code: str):
+        """Add a preview message with approve/cancel buttons."""
+        self._chat_list.add_preview_message(description, preview_items, code)
+
     def add_message_from_dict(self, msg_dict: dict, show_debug: bool = False):
         """Load a message from session JSON."""
         import FreeCAD
         role = msg_dict.get("role", "system")
         text = msg_dict.get("text", "")
+        changes = msg_dict.get("changes")
 
-        FreeCAD.Console.PrintMessage(f"AIAssistant: add_message_from_dict ENTER - role={role!r}, text={text[:30]!r}\n")
+        FreeCAD.Console.PrintMessage(f"AIAssistant: add_message_from_dict ENTER - role={role!r}, text={text[:30]!r}, has_changes={changes is not None}\n")
+
+        # Handle change messages (stored as system role with changes data)
+        if changes:
+            FreeCAD.Console.PrintMessage(f"AIAssistant: Loading change message\n")
+            self.add_change_message(changes)
+            return
 
         # Skip system messages - they're UI feedback and shouldn't be reloaded
         # Check both the constant and the literal string for robustness

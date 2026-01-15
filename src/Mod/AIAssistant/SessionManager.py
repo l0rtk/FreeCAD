@@ -135,6 +135,10 @@ class SessionManager:
             ]
         }
 
+        # Include change visualization data if present
+        if hasattr(message, 'changes') and message.changes:
+            message_dict["changes"] = message.changes
+
         # Append to current session
         self._current_session_data["messages"].append(message_dict)
         self._current_session_data["updated"] = datetime.now().isoformat()

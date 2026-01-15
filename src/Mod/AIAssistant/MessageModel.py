@@ -5,7 +5,7 @@ Message Model - Data structures and Qt model for chat messages.
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 import re
 
 from PySide6 import QtCore
@@ -29,6 +29,7 @@ class ChatMessage:
     code_blocks: List[CodeBlock] = field(default_factory=list)
     is_streaming: bool = False
     displayed_text: str = ""  # For streaming animation
+    changes: Optional[Dict[str, Any]] = None  # Change visualization data
 
     def __post_init__(self):
         if not self.displayed_text:
@@ -86,6 +87,7 @@ class ChatMessageModel(QtCore.QAbstractListModel):
     IsStreamingRole = QtCore.Qt.UserRole + 5
     DisplayedTextRole = QtCore.Qt.UserRole + 6
     HasCodeRole = QtCore.Qt.UserRole + 7
+    ChangesRole = QtCore.Qt.UserRole + 8
 
     # Signal emitted when a message is added (for session persistence)
     message_added = QtCore.Signal(object)  # Emits ChatMessage
@@ -119,6 +121,8 @@ class ChatMessageModel(QtCore.QAbstractListModel):
             return message.displayed_text
         elif role == self.HasCodeRole:
             return message.has_code()
+        elif role == self.ChangesRole:
+            return message.changes
 
         return None
 
@@ -132,9 +136,11 @@ class ChatMessageModel(QtCore.QAbstractListModel):
             self.IsStreamingRole: b"isStreaming",
             self.DisplayedTextRole: b"displayedText",
             self.HasCodeRole: b"hasCode",
+            self.ChangesRole: b"changes",
         }
 
-    def add_message(self, text: str, role: str, is_streaming: bool = False) -> int:
+    def add_message(self, text: str, role: str, is_streaming: bool = False,
+                    changes: Optional[Dict[str, Any]] = None) -> int:
         """Add a new message and return its index."""
         row = len(self._messages)
         self.beginInsertRows(QtCore.QModelIndex(), row, row)
@@ -143,7 +149,8 @@ class ChatMessageModel(QtCore.QAbstractListModel):
             text=text,
             role=role,
             is_streaming=is_streaming,
-            displayed_text="" if is_streaming else text
+            displayed_text="" if is_streaming else text,
+            changes=changes
         )
         self._messages.append(message)
 
@@ -156,7 +163,7 @@ class ChatMessageModel(QtCore.QAbstractListModel):
         return row
 
     def update_message(self, row: int, text: str = None, displayed_text: str = None,
-                       is_streaming: bool = None):
+                       is_streaming: bool = None, changes: Dict[str, Any] = None):
         """Update an existing message."""
         if row < 0 or row >= len(self._messages):
             return
@@ -171,6 +178,8 @@ class ChatMessageModel(QtCore.QAbstractListModel):
             message.displayed_text = displayed_text
         if is_streaming is not None:
             message.is_streaming = is_streaming
+        if changes is not None:
+            message.changes = changes
 
         index = self.index(row)
         self.dataChanged.emit(index, index)

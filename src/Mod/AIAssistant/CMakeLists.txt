@@ -17,6 +17,10 @@ SET(AIAssistant_SRCS
     SyntaxHighlighter.py
     SessionManager.py
     SnapshotManager.py
+    ChangeDetector.py
+    ChangeWidget.py
+    PreviewManager.py
+    PreviewWidget.py
 )
 
 SOURCE_GROUP("" FILES ${AIAssistant_SRCS})

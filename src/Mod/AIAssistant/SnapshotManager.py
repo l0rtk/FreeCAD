@@ -439,28 +439,21 @@ def _generate_python_script(snapshot: Dict) -> str:
     return "\n".join(lines)
 
 
-def save_snapshot(timestamp: str = None, include_brep: bool = True) -> Optional[str]:
-    """Save a comprehensive snapshot of all document objects.
+def capture_current_state(include_brep: bool = False) -> Optional[Dict]:
+    """Capture current document state as dict for change detection.
+
+    This is an in-memory operation that does not save to disk.
+    Use this for before/after comparison when executing code.
 
     Args:
-        timestamp: Optional timestamp string for the filename (matches session ID).
-        include_brep: Whether to include BREP data for exact geometry reconstruction.
+        include_brep: Whether to include BREP data (usually False for change detection).
 
     Returns:
-        Path to the saved JSON file, or None if failed.
+        Snapshot dictionary suitable for change detection, or None if no document.
     """
     doc = FreeCAD.ActiveDocument
     if not doc:
-        FreeCAD.Console.PrintWarning("AIAssistant: No active document for snapshot\n")
         return None
-
-    snapshots_dir = get_snapshots_dir()
-    if not snapshots_dir:
-        FreeCAD.Console.PrintWarning("AIAssistant: Could not determine snapshots directory\n")
-        return None
-
-    if timestamp is None:
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     # Collect all object data
     objects_data = []
@@ -472,10 +465,10 @@ def save_snapshot(timestamp: str = None, include_brep: bool = True) -> Optional[
 
         try:
             objects_data.append(capture_object_data(obj, include_brep=include_brep))
-        except Exception as e:
-            FreeCAD.Console.PrintWarning(f"AIAssistant: Failed to capture {obj.Label}: {e}\n")
+        except Exception:
+            continue
 
-    snapshot = {
+    return {
         "timestamp": datetime.now().isoformat(),
         "document": {
             "name": doc.Name,
@@ -487,6 +480,30 @@ def save_snapshot(timestamp: str = None, include_brep: bool = True) -> Optional[
         "objects": objects_data,
         "dependency_graph": _build_dependency_graph(doc.Objects)
     }
+
+
+def save_snapshot(timestamp: str = None, include_brep: bool = True) -> Optional[str]:
+    """Save a comprehensive snapshot of all document objects.
+
+    Args:
+        timestamp: Optional timestamp string for the filename (matches session ID).
+        include_brep: Whether to include BREP data for exact geometry reconstruction.
+
+    Returns:
+        Path to the saved JSON file, or None if failed.
+    """
+    snapshot = capture_current_state(include_brep=include_brep)
+    if not snapshot:
+        FreeCAD.Console.PrintWarning("AIAssistant: No active document for snapshot\n")
+        return None
+
+    snapshots_dir = get_snapshots_dir()
+    if not snapshots_dir:
+        FreeCAD.Console.PrintWarning("AIAssistant: Could not determine snapshots directory\n")
+        return None
+
+    if timestamp is None:
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
     # Save JSON snapshot
     json_path = snapshots_dir / f"{timestamp}.json"
