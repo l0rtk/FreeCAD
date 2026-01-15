@@ -467,6 +467,9 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         # Ensure source file exists for saved documents
         self._ensure_source_file()
 
+        # Backup source.py before Claude potentially edits it (for restore on cancel)
+        SourceManager.backup_source()
+
         # Build context if enabled (using context widget selection)
         context = ""
         if self.context_action.isChecked():
@@ -546,6 +549,16 @@ Do NOT write any code. Only output the numbered plan steps."""
             self.pending_input = None
             return
 
+        # Check if Claude edited source.py directly (new direct editing flow)
+        if getattr(self.llm, 'source_was_edited', False):
+            FreeCAD.Console.PrintMessage("AIAssistant: Detected direct source.py edit - using diff preview\n")
+            self._handle_source_edit_response(response)
+            self.pending_input = None
+            return
+
+        # Claude didn't edit source.py - clear backup so patch flow is used on approve
+        SourceManager.clear_backup()
+
         # Parse description and code from response
         description, code = self._parse_response(response)
 
@@ -566,6 +579,73 @@ Do NOT write any code. Only output the numbered plan steps."""
         self._attempt_preview_with_autofix(description, code, response)
 
         self.pending_input = None
+
+    def _handle_source_edit_response(self, response: str):
+        """Handle response where Claude edited source.py directly.
+
+        This is the new direct source editing flow:
+        1. Get OLD source.py from backup
+        2. Get NEW source.py from disk (Claude already edited it)
+        3. Create diff preview showing what changed
+        4. On approve: execute new source.py
+        5. On cancel: restore from backup
+
+        Args:
+            response: Claude's text response (explanation of changes)
+        """
+        old_source = SourceManager.get_backup_content()
+        new_source = SourceManager.read_source()
+
+        # Debug: log what changed
+        FreeCAD.Console.PrintMessage(
+            f"AIAssistant: Old source length: {len(old_source) if old_source else 0}, "
+            f"New source length: {len(new_source) if new_source else 0}\n"
+        )
+
+        # If no backup or no change, just show the text response
+        if not old_source or old_source == new_source:
+            FreeCAD.Console.PrintMessage("AIAssistant: No source changes detected\n")
+            SourceManager.clear_backup()
+            tool_calls = getattr(self.llm, 'last_tool_calls', None)
+            self._chat.add_assistant_message(response, tool_calls=tool_calls)
+            return
+
+        # Create diff preview - execute OLD vs NEW, show differences
+        FreeCAD.Console.PrintMessage("AIAssistant: Creating diff preview...\n")
+        success, error_msg = self._preview_manager.create_diff_preview(old_source, new_source)
+
+        if success:
+            # Get preview summary
+            preview_items = self._preview_manager.get_preview_summary()
+            is_deletion = self._preview_manager.is_deletion_preview()
+
+            FreeCAD.Console.PrintMessage(
+                f"AIAssistant: Diff preview created with {len(preview_items)} changes "
+                f"(deletion={is_deletion})\n"
+            )
+
+            # Check if auto-accept is enabled
+            auto_approve = self.auto_accept_action.isChecked()
+
+            # Get tool calls from backend
+            tool_calls = getattr(self.llm, 'last_tool_calls', None)
+
+            # Show preview widget
+            # Note: For source edits, the "code" is the new source.py content
+            # This is used by approve handler to know it's a source edit
+            self._chat.add_preview_message(
+                description=response or "Source.py modified",
+                preview_items=preview_items,
+                code=new_source,  # Full new source.py
+                is_deletion=is_deletion,
+                auto_approve=auto_approve,
+                tool_calls=tool_calls
+            )
+        else:
+            # Diff preview failed - restore backup and show error
+            FreeCAD.Console.PrintWarning(f"AIAssistant: Diff preview failed: {error_msg}\n")
+            SourceManager.restore_source()
+            self._chat.add_error_message(f"Preview failed: {error_msg}")
 
     def _attempt_preview_with_autofix(self, description: str, code: str, original_response: str, attempt: int = 1):
         """Try to create preview, auto-fix errors if needed.
@@ -815,8 +895,65 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
         # Clear the preview objects
         self._preview_manager.clear_preview()
 
-        # Execute the code and show changes (mark as already executed so no Run button)
-        self._on_run_code(code, already_executed=True)
+        # Check if this is a source edit (backup exists) vs old-style patch
+        if SourceManager.has_backup():
+            # Source edit flow: source.py already has the changes, execute it
+            FreeCAD.Console.PrintMessage("AIAssistant: Executing edited source.py\n")
+            source_content = SourceManager.read_source()
+
+            # Capture state BEFORE clearing (to detect what was deleted)
+            before_snapshot = SnapshotManager.capture_current_state()
+
+            # CRITICAL: Clear all document objects before re-executing source.py
+            # This prevents duplicates (Floor001, etc.) when objects already exist
+            doc = FreeCAD.ActiveDocument
+            if doc:
+                # Build list of objects to remove (excluding system objects)
+                objects_to_remove = [
+                    obj.Name for obj in doc.Objects
+                    if obj.TypeId not in ("App::Origin", "App::Plane", "App::Line")
+                ]
+                FreeCAD.Console.PrintMessage(
+                    f"AIAssistant: Clearing {len(objects_to_remove)} objects before re-execution\n"
+                )
+                for obj_name in objects_to_remove:
+                    try:
+                        doc.removeObject(obj_name)
+                    except Exception:
+                        pass
+
+            # Execute the new source.py (on clean document)
+            success, message = CodeExecutor.execute(source_content)
+
+            # Capture state after
+            after_snapshot = SnapshotManager.capture_current_state()
+
+            if success:
+                # Clear backup - source.py is now canonical
+                SourceManager.clear_backup()
+
+                # Capture screenshot for LLM feedback
+                self._last_screenshot = self._capture_screenshot()
+
+                # Detect and show changes
+                change_set = ChangeDetector.detect_changes(
+                    before_snapshot, after_snapshot, code=""
+                )
+                change_set.execution_success = success
+                change_set.execution_message = message
+
+                if change_set.is_empty():
+                    self._chat.add_system_message("Source.py executed successfully (no object changes)")
+                else:
+                    self._chat.add_change_message(change_set)
+            else:
+                # Execution failed - restore backup
+                FreeCAD.Console.PrintError(f"AIAssistant: Source execution failed: {message}\n")
+                SourceManager.restore_source()
+                self._chat.add_error_message(f"Execution error: {message}")
+        else:
+            # Old-style patch flow: execute the code and show changes
+            self._on_run_code(code, already_executed=True)
 
     def _on_preview_cancelled(self):
         """Handle user cancellation of preview."""
@@ -824,6 +961,11 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
 
         # Clear the preview objects
         self._preview_manager.cancel()
+
+        # Restore source.py from backup if this was a source edit
+        if SourceManager.has_backup():
+            FreeCAD.Console.PrintMessage("AIAssistant: Restoring source.py from backup\n")
+            SourceManager.restore_source()
 
         # Add a system message
         self._chat.add_system_message("Preview cancelled")

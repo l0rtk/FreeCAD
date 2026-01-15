@@ -17,30 +17,34 @@ from typing import Optional, List, Dict
 import FreeCAD
 
 
-# System prompt used when no project CLAUDE.md exists
-FREECAD_SYSTEM_PROMPT = """You are a FreeCAD AI assistant helping design 3D models.
+# System prompt template - {repo_root} and {source_path} are filled at runtime
+FREECAD_SYSTEM_PROMPT_TEMPLATE = """You are a FreeCAD AI assistant.
+Edit source.py directly to make design changes.
 
-Response format:
-- To CREATE/MODIFY objects: Return ONLY executable Python code (no markdown, no explanations)
-- To ANSWER questions: Return clear text
+source.py location: {source_path}
+
+WORKFLOW:
+1. Read source.py to understand current design
+2. Use Edit tool to modify source.py directly
+3. CREATE objects: Add code to source.py
+4. DELETE objects: Remove the relevant code from source.py
+5. MODIFY objects: Edit the relevant code in source.py
+
+The source.py file is a Python script that generates FreeCAD geometry when executed.
+It is the single source of truth for the design.
 
 Code rules:
-- Use: doc = FreeCAD.ActiveDocument or FreeCAD.newDocument("Design")
-- End with doc.recompute()
 - Use millimeters for dimensions
-- Use descriptive Labels
-- Do NOT recreate existing elements
-- Use object Names (not Labels) when referencing objects in code
-- To delete: doc.removeObject('ObjectName')
+- End code with doc.recompute()
+- Use descriptive Labels for objects
+- Use object Names (not Labels) when referencing in code
 
-FreeCAD API documentation locations (use Glob/Read to explore):
-- Part module primitives: src/Mod/Part/App/AppPartPy.cpp (docstrings for makeBox, makeCylinder, etc.)
-- Part type stubs: src/Mod/Part/App/*.pyi (full method signatures)
-- TopoShape operations: src/Mod/Part/App/TopoShapePy.xml and TopoShape.pyi
-- Sketcher: src/Mod/Sketcher/App/*.pyi
-- PartDesign features: src/Mod/PartDesign/App/*.pyi
+FreeCAD API documentation (use Read tool with these paths if needed):
+- Part primitives: {repo_root}/src/Mod/Part/App/AppPartPy.cpp
+- Part type stubs: {repo_root}/src/Mod/Part/App/*.pyi
+- TopoShape: {repo_root}/src/Mod/Part/App/TopoShapePy.xml
 
-When unsure about API parameters, use Glob to find relevant .pyi files and Read to check signatures."""
+To ANSWER questions (not modify design): Return clear text explanation."""
 
 
 class ClaudeCodeBackend:
@@ -77,6 +81,9 @@ class ClaudeCodeBackend:
         self.last_conversation = []
         self.last_tool_calls: List[Dict] = []  # Tool calls made during last request
 
+        # Track if source.py was edited (for direct source editing flow)
+        self.source_was_edited: bool = False
+
     def chat(
         self,
         user_message: str,
@@ -111,13 +118,18 @@ class ClaudeCodeBackend:
         # Note: stream-json requires --verbose when used with -p (print mode)
         cmd = ["claude", "-p", "--verbose", "--output-format", "stream-json"]
 
-        # Restrict to read-only tools for safety
-        cmd.extend(["--allowedTools", "Read,Glob,Grep"])
+        # Allow Edit tool for direct source.py modification
+        cmd.extend(["--allowedTools", "Read,Glob,Grep,Edit"])
 
-        # Add system prompt if no project CLAUDE.md exists
+        # Build system prompt with actual paths
         if not self._has_claude_md():
-            cmd.extend(["--append-system-prompt", FREECAD_SYSTEM_PROMPT])
-            self.last_system_prompt = FREECAD_SYSTEM_PROMPT
+            source_path = self._get_source_path()
+            system_prompt = FREECAD_SYSTEM_PROMPT_TEMPLATE.format(
+                source_path=source_path or "(no project)",
+                repo_root=self._repo_root or ""
+            )
+            cmd.extend(["--append-system-prompt", system_prompt])
+            self.last_system_prompt = system_prompt
         else:
             self.last_system_prompt = "(Using project CLAUDE.md)"
 
@@ -128,13 +140,15 @@ class ClaudeCodeBackend:
         # NOTE: Prompt is passed via stdin, not as command line argument
         # This avoids shell escaping issues with special characters
 
-        # Set working directory to repo root (so Claude can read FreeCAD API source)
-        cwd = self._repo_root or os.getcwd()
+        # Set working directory to PROJECT directory (so Claude can edit source.py)
+        # Claude can still read API docs via absolute paths in the prompt
+        cwd = self.project_dir or self._repo_root or os.getcwd()
 
         FreeCAD.Console.PrintMessage(f"AIAssistant: Calling Claude Code in {cwd}\n")
 
-        # Reset tool calls for this request
+        # Reset state for this request
         self.last_tool_calls = []
+        self.source_was_edited = False
 
         start_time = time.time()
         try:
@@ -211,6 +225,17 @@ class ClaudeCodeBackend:
             # Store tool calls for UI access
             self.last_tool_calls = tool_calls
 
+            # Track if source.py was edited (for direct source editing flow)
+            for tc in tool_calls:
+                if tc.get("tool") == "Edit":
+                    file_path = tc.get("input", {}).get("file_path", "")
+                    if "source.py" in file_path:
+                        self.source_was_edited = True
+                        FreeCAD.Console.PrintMessage(
+                            "AIAssistant: Detected source.py edit\n"
+                        )
+                        break
+
             # Check for process errors
             if process.returncode != 0:
                 stderr = process.stderr.read()
@@ -253,14 +278,12 @@ class ClaudeCodeBackend:
     def _build_prompt(self, message: str, context: str, screenshot_path: str = None) -> str:
         """Build the prompt for Claude Code.
 
-        If running in a project directory with CLAUDE.md, Claude will read that file.
-        Otherwise, we include context directly in the prompt.
-
-        Note: Claude runs from repo root, so project files need absolute paths.
+        Claude runs from project directory and can edit source.py directly.
+        FreeCAD API docs are accessible via absolute paths in the system prompt.
         """
         parts = []
 
-        # Tell Claude where project files are (since we run from repo root)
+        # Include project info in prompt
         if self.project_dir:
             project_path = Path(self.project_dir).resolve()
             parts.append(f"Project directory: {project_path}")
@@ -338,6 +361,11 @@ class ClaudeCodeBackend:
             if len(path) > 30:
                 path = "..." + path[-27:]
             return f"Grep: '{pattern}' in {path}"
+        elif tool == "Edit":
+            path = input_data.get("file_path", "")
+            if len(path) > 50:
+                path = "..." + path[-47:]
+            return f"Edit: {path}"
         elif tool == "Bash":
             cmd = input_data.get("command", "")
             if len(cmd) > 50:
@@ -348,6 +376,13 @@ class ClaudeCodeBackend:
             return f"Task: {desc}"
         else:
             return f"{tool}"
+
+    def _get_source_path(self) -> Optional[str]:
+        """Get absolute path to source.py for the project."""
+        if self.project_dir:
+            source_path = Path(self.project_dir) / "source.py"
+            return str(source_path.resolve())
+        return None
 
     def _has_claude_md(self) -> bool:
         """Check if project has CLAUDE.md file.

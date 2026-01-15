@@ -26,6 +26,10 @@ _pending_code: List[Tuple[str, str, str]] = []
 # Document observer instance (set on module load)
 _observer = None
 
+# Backup of source.py content before Claude edits it
+# Used for restore on cancel and diff preview
+_source_backup: Optional[str] = None
+
 
 class _SourceManagerObserver:
     """
@@ -419,3 +423,91 @@ def init_source_file(source_path: Path = None, doc_name: str = None) -> bool:
     except Exception as e:
         FreeCAD.Console.PrintWarning(f"SourceManager: Failed to initialize: {e}\n")
         return False
+
+
+# =============================================================================
+# Backup/Restore for Direct Source Editing
+# =============================================================================
+
+
+def backup_source() -> bool:
+    """
+    Backup source.py content before Claude edits it.
+
+    Called before each Claude Code invocation to enable:
+    1. Restore on cancel (undo Claude's edits)
+    2. Diff preview (compare OLD vs NEW source.py execution)
+
+    Returns:
+        True if backed up successfully, False if no source file
+    """
+    global _source_backup
+
+    source_path = get_source_path()
+    if not source_path or not source_path.exists():
+        _source_backup = None
+        return False
+
+    try:
+        _source_backup = source_path.read_text()
+        FreeCAD.Console.PrintMessage("SourceManager: Backed up source.py\n")
+        return True
+    except Exception as e:
+        FreeCAD.Console.PrintWarning(f"SourceManager: Backup failed: {e}\n")
+        _source_backup = None
+        return False
+
+
+def restore_source() -> bool:
+    """
+    Restore source.py from backup (on cancel).
+
+    Called when user cancels preview to undo Claude's edits.
+
+    Returns:
+        True if restored successfully, False if no backup
+    """
+    global _source_backup
+
+    if _source_backup is None:
+        return False
+
+    source_path = get_source_path()
+    if not source_path:
+        _source_backup = None
+        return False
+
+    try:
+        source_path.write_text(_source_backup)
+        FreeCAD.Console.PrintMessage("SourceManager: Restored source.py from backup\n")
+        _source_backup = None
+        return True
+    except Exception as e:
+        FreeCAD.Console.PrintWarning(f"SourceManager: Restore failed: {e}\n")
+        return False
+
+
+def get_backup_content() -> Optional[str]:
+    """
+    Get the backed up source.py content for diff preview.
+
+    Returns:
+        Backup content, or None if no backup exists
+    """
+    return _source_backup
+
+
+def clear_backup():
+    """
+    Clear backup after successful approve.
+
+    Called when user approves preview - source.py is now the canonical version.
+    """
+    global _source_backup
+    _source_backup = None
+    FreeCAD.Console.PrintMessage("SourceManager: Cleared backup\n")
+
+
+def has_backup() -> bool:
+    """Check if there's an active backup."""
+    return _source_backup is not None

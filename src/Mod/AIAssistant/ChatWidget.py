@@ -92,7 +92,9 @@ class ChatListWidget(QtWidgets.QScrollArea):
             self._model.update_message(row, text=text, displayed_text=text,
                                        is_streaming=not is_complete)
             widget = self._message_widgets[row]
-            widget.update_displayed_text(text)
+            # Only update if widget supports streaming (has update_displayed_text)
+            if hasattr(widget, 'update_displayed_text'):
+                widget.update_displayed_text(text)
             QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
 
     def show_typing_indicator(self):

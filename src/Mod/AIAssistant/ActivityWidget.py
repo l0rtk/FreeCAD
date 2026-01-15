@@ -14,6 +14,7 @@ TOOL_ICONS = {
     "Glob": "\U0001F50D",      # 🔍
     "Read": "\U0001F4C4",      # 📄
     "Grep": "\U0001F50E",      # 🔎
+    "Edit": "\U0000270F",      # ✏️
     "Bash": "\U0001F4BB",      # 💻
     "Task": "\U0001F4CB",      # 📋
     "WebFetch": "\U0001F310",  # 🌐
@@ -48,6 +49,12 @@ def format_tool_call(tool: str, input_data: dict) -> str:
         if len(path) > 30:
             path = "..." + path[-27:]
         return f"{icon} Grep: '{pattern}' in {path}"
+    elif tool == "Edit":
+        path = input_data.get("file_path", "")
+        # Show just filename for source.py edits
+        if "/" in path:
+            path = path.split("/")[-1]
+        return f"{icon} Edit: {path}"
     elif tool == "Bash":
         cmd = input_data.get("command", "")
         if len(cmd) > 60:

@@ -460,6 +460,219 @@ class PreviewManager:
 
         return result
 
+    # =========================================================================
+    # Direct Source Editing - Diff Preview
+    # =========================================================================
+
+    def create_diff_preview(self, old_source: str, new_source: str) -> tuple:
+        """Create preview showing diff between old and new source.py.
+
+        Executes both versions in sandbox, compares resulting objects:
+        - Objects in OLD but not NEW = deleted (red highlight in main doc)
+        - Objects in NEW but not OLD = created (green preview)
+
+        Used for direct source editing flow where Claude edits source.py.
+
+        Args:
+            old_source: Previous source.py content (from backup)
+            new_source: New source.py content (after Claude's edit)
+
+        Returns:
+            Tuple of (success: bool, error_message: str)
+        """
+        main_doc = FreeCAD.ActiveDocument
+        if not main_doc:
+            FreeCAD.Console.PrintWarning("AIAssistant: No active document for preview\n")
+            return (False, "No active document")
+
+        self._main_doc_name = main_doc.Name
+        self._pending_code = new_source  # Store new source for execution on approve
+
+        # Clear any existing preview
+        self.clear_preview()
+
+        try:
+            # Execute OLD source in sandbox
+            FreeCAD.Console.PrintMessage(
+                "AIAssistant: Executing old source.py in sandbox...\n"
+            )
+            old_objects, old_shapes = self._execute_source_in_sandbox(old_source)
+            FreeCAD.Console.PrintMessage(
+                f"AIAssistant: Old source objects: {sorted(old_objects)}\n"
+            )
+
+            # Execute NEW source in sandbox
+            FreeCAD.Console.PrintMessage(
+                "AIAssistant: Executing new source.py in sandbox...\n"
+            )
+            new_objects, new_shapes = self._execute_source_in_sandbox(new_source)
+            FreeCAD.Console.PrintMessage(
+                f"AIAssistant: New source objects: {sorted(new_objects)}\n"
+            )
+
+            # Compute diff
+            deleted_names = old_objects - new_objects  # Objects removed
+            created_names = new_objects - old_objects  # Objects added
+
+            FreeCAD.Console.PrintMessage(
+                f"AIAssistant: Diff - {len(deleted_names)} deleted ({list(deleted_names)}), "
+                f"{len(created_names)} created ({list(created_names)})\n"
+            )
+
+            # Show deleted objects as red highlight in main doc
+            for obj_name in deleted_names:
+                obj = main_doc.getObject(obj_name)
+                if obj and hasattr(obj, 'ViewObject') and obj.ViewObject:
+                    vo = obj.ViewObject
+                    # Store original appearance
+                    self._deletion_originals[obj_name] = {
+                        'color': vo.ShapeColor if hasattr(vo, 'ShapeColor') else None,
+                        'transparency': vo.Transparency if hasattr(vo, 'Transparency') else None,
+                        'line_color': vo.LineColor if hasattr(vo, 'LineColor') else None,
+                    }
+                    # Apply red highlight
+                    if hasattr(vo, 'ShapeColor'):
+                        vo.ShapeColor = DELETION_COLOR
+                    if hasattr(vo, 'Transparency'):
+                        vo.Transparency = DELETION_TRANSPARENCY
+                    if hasattr(vo, 'LineColor'):
+                        vo.LineColor = (0.7, 0.1, 0.1)
+                    self._deletion_targets.append(obj_name)
+
+            # Show created objects as green preview
+            for obj_name in created_names:
+                if obj_name in new_shapes:
+                    shape = new_shapes[obj_name]
+                    if shape and not shape.isNull():
+                        self._add_preview_shape_direct(main_doc, obj_name, shape)
+
+            self._is_deletion = len(deleted_names) > 0
+
+            main_doc.recompute()
+
+            # Fit view
+            try:
+                if FreeCADGui.ActiveDocument and FreeCADGui.ActiveDocument.ActiveView:
+                    FreeCADGui.ActiveDocument.ActiveView.fitAll()
+            except Exception:
+                pass
+
+            total_changes = len(deleted_names) + len(created_names)
+            if total_changes > 0:
+                FreeCAD.Console.PrintMessage(
+                    f"AIAssistant: Created diff preview ({len(deleted_names)} deleted, "
+                    f"{len(created_names)} created)\n"
+                )
+                return (True, "")
+            else:
+                return (False, "No changes detected between old and new source.py")
+
+        except Exception as e:
+            import traceback
+            error_msg = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+            FreeCAD.Console.PrintError(f"AIAssistant: Diff preview failed: {e}\n")
+            self.clear_preview()
+            return (False, error_msg)
+
+    def _execute_source_in_sandbox(self, source_code: str) -> Tuple[set, Dict]:
+        """Execute source code in temp doc, return object names and shapes.
+
+        Args:
+            source_code: Python source code to execute
+
+        Returns:
+            Tuple of (object_names: set, shapes: dict mapping name -> Shape)
+        """
+        temp_doc = None
+        try:
+            temp_doc = FreeCAD.newDocument("__AIDiffSandbox__", hidden=True)
+        except TypeError:
+            temp_doc = FreeCAD.newDocument("__AIDiffSandbox__")
+
+        try:
+            # Build execution environment
+            exec_globals = {
+                'FreeCAD': FreeCAD,
+                'Part': Part,
+                'doc': temp_doc,
+            }
+
+            # Add common imports
+            try:
+                import Draft
+                exec_globals['Draft'] = Draft
+            except ImportError:
+                pass
+
+            try:
+                import Arch
+                exec_globals['Arch'] = Arch
+            except ImportError:
+                pass
+
+            # Execute source
+            FreeCAD.setActiveDocument(temp_doc.Name)
+            try:
+                exec(source_code, exec_globals)
+                temp_doc.recompute()
+            except Exception as exec_error:
+                FreeCAD.Console.PrintError(
+                    f"AIAssistant: Sandbox exec failed: {exec_error}\n"
+                )
+                # Return empty set on failure
+                return set(), {}
+            finally:
+                if self._main_doc_name and FreeCAD.getDocument(self._main_doc_name):
+                    FreeCAD.setActiveDocument(self._main_doc_name)
+
+            # Collect object names and shapes
+            object_names = set()
+            shapes = {}
+            for obj in temp_doc.Objects:
+                if obj.TypeId in ("App::Origin", "App::Plane", "App::Line"):
+                    continue
+                object_names.add(obj.Name)
+                if hasattr(obj, 'Shape') and obj.Shape and not obj.Shape.isNull():
+                    shapes[obj.Name] = obj.Shape.copy()
+
+            return object_names, shapes
+
+        finally:
+            # Close temp doc
+            if temp_doc:
+                try:
+                    FreeCAD.closeDocument(temp_doc.Name)
+                except Exception:
+                    pass
+
+    def _add_preview_shape_direct(self, doc, name: str, shape):
+        """Add a preview shape directly from a Shape object.
+
+        Args:
+            doc: Target document (main doc)
+            name: Object name for the preview
+            shape: Part.Shape to preview
+        """
+        try:
+            preview_name = f"__preview_{name}"
+            preview = doc.addObject("Part::Feature", preview_name)
+            preview.Shape = shape
+            preview.Label = f"[Preview] {name}"
+
+            # Style as green transparent
+            if hasattr(preview, 'ViewObject') and preview.ViewObject:
+                preview.ViewObject.ShapeColor = PREVIEW_COLOR
+                preview.ViewObject.Transparency = PREVIEW_TRANSPARENCY
+                preview.ViewObject.DisplayMode = "Shaded"
+                preview.ViewObject.LineColor = (0.0, 0.7, 0.2)
+
+            self._preview_objects.append(preview_name)
+
+        except Exception as e:
+            FreeCAD.Console.PrintWarning(
+                f"AIAssistant: Failed to add preview for {name}: {e}\n"
+            )
+
     def has_preview(self) -> bool:
         """Check if there's an active preview (creation or deletion)."""
         return len(self._preview_objects) > 0 or len(self._deletion_targets) > 0
