@@ -714,7 +714,7 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
         """
         import re
 
-        # Try to find Python code block
+        # Try to find Python code block with closing fence
         code_match = re.search(r'```python\s*(.*?)\s*```', response, re.DOTALL)
         if code_match:
             code = code_match.group(1).strip()
@@ -725,12 +725,24 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
             description = description.strip()
             return (description, code)
 
-        # Try to find any code block
+        # Try to find any code block with closing fence
         code_match = re.search(r'```\s*(.*?)\s*```', response, re.DOTALL)
         if code_match:
             code = code_match.group(1).strip()
             description = response[:code_match.start()].strip()
             description = re.sub(r'\n+', ' ', description)
+            return (description, code)
+
+        # Handle UNCLOSED code blocks (LLM truncated response without closing ```)
+        # This is a common issue where the response has ```python but no closing ```
+        unclosed_match = re.search(r'```python\s*\n(.*)', response, re.DOTALL)
+        if unclosed_match:
+            code = unclosed_match.group(1).strip()
+            description = response[:unclosed_match.start()].strip()
+            description = re.sub(r'\n+', ' ', description)
+            FreeCAD.Console.PrintWarning(
+                "AIAssistant: Detected unclosed code block - LLM response may be truncated\n"
+            )
             return (description, code)
 
         # No code block found - might be pure code or pure text

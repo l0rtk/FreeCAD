@@ -29,16 +29,25 @@ Code rules:
 - End with doc.recompute()
 - Use millimeters for dimensions
 - Use descriptive Labels
-- Read .freecad_ai/source.py to understand existing objects
 - Do NOT recreate existing elements
 - Use object Names (not Labels) when referencing objects in code
-- To delete: doc.removeObject('ObjectName')"""
+- To delete: doc.removeObject('ObjectName')
+
+FreeCAD API documentation locations (use Glob/Read to explore):
+- Part module primitives: src/Mod/Part/App/AppPartPy.cpp (docstrings for makeBox, makeCylinder, etc.)
+- Part type stubs: src/Mod/Part/App/*.pyi (full method signatures)
+- TopoShape operations: src/Mod/Part/App/TopoShapePy.xml and TopoShape.pyi
+- Sketcher: src/Mod/Sketcher/App/*.pyi
+- PartDesign features: src/Mod/PartDesign/App/*.pyi
+
+When unsure about API parameters, use Glob to find relevant .pyi files and Read to check signatures."""
 
 
 class ClaudeCodeBackend:
     """LLM backend using Claude Code CLI in headless mode.
 
     Benefits over HTTP API:
+    - Claude can read FreeCAD source code (.pyi stubs, docstrings)
     - Claude can read project files on-demand (source.py, snapshots/)
     - Project-specific CLAUDE.md for custom instructions
     - Session continuity via --resume
@@ -49,10 +58,11 @@ class ClaudeCodeBackend:
         """Initialize the Claude Code backend.
 
         Args:
-            project_dir: Working directory for Claude Code. If set, Claude will
-                        load CLAUDE.md from this directory and can read project files.
+            project_dir: Project directory for accessing source.py and snapshots.
+                        Note: Claude runs from repo root to access FreeCAD API docs.
         """
         self.project_dir = project_dir
+        self._repo_root = self._find_repo_root()
         self._session_id: Optional[str] = None
 
         # Model identifier (matches LLMBackend interface)
@@ -116,8 +126,8 @@ class ClaudeCodeBackend:
         # NOTE: Prompt is passed via stdin, not as command line argument
         # This avoids shell escaping issues with special characters
 
-        # Set working directory to project folder
-        cwd = self.project_dir or os.getcwd()
+        # Set working directory to repo root (so Claude can read FreeCAD API source)
+        cwd = self._repo_root or os.getcwd()
 
         FreeCAD.Console.PrintMessage(f"AIAssistant: Calling Claude Code in {cwd}\n")
 
@@ -202,8 +212,19 @@ class ClaudeCodeBackend:
 
         If running in a project directory with CLAUDE.md, Claude will read that file.
         Otherwise, we include context directly in the prompt.
+
+        Note: Claude runs from repo root, so project files need absolute paths.
         """
         parts = []
+
+        # Tell Claude where project files are (since we run from repo root)
+        if self.project_dir:
+            project_path = Path(self.project_dir).resolve()
+            parts.append(f"Project directory: {project_path}")
+            source_file = project_path / "source.py"
+            if source_file.exists():
+                parts.append(f"Code history: {source_file}")
+            parts.append("")  # Blank line
 
         # If no project CLAUDE.md exists, include context directly
         if self.project_dir:
@@ -267,6 +288,23 @@ class ClaudeCodeBackend:
         if self.project_dir:
             return (Path(self.project_dir) / "CLAUDE.md").exists()
         return False
+
+    def _find_repo_root(self) -> Optional[str]:
+        """Find FreeCAD repo root directory.
+
+        Walks up from this file's location to find the directory containing src/Mod/.
+        This allows Claude to read FreeCAD API source files (.pyi stubs, docstrings).
+
+        Returns:
+            Repo root path, or None if not found
+        """
+        current = Path(__file__).resolve().parent
+        # Walk up to find repo root (contains src/Mod/)
+        while current.parent != current:
+            if (current / "src" / "Mod").exists():
+                return str(current)
+            current = current.parent
+        return None
 
     def clear_session(self):
         """Clear the current session (start fresh conversation)."""
