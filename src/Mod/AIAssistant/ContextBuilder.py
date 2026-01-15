@@ -224,10 +224,15 @@ def _get_import_export_formats() -> str:
     return ""
 
 
-def build_context() -> str:
+def build_context(objects_filter: list = None) -> str:
     """
     Build a detailed context string describing the current FreeCAD state.
     This helps the AI understand what already exists in the document.
+
+    Args:
+        objects_filter: Optional list of object names to include in context.
+                       If None, includes all objects.
+                       If empty list, minimal context (environment only).
 
     Returns:
         A formatted string describing document objects, organized by type.
@@ -259,10 +264,22 @@ def build_context() -> str:
 
     lines.append(f"## Document: {doc.Name}")
 
-    # Get all objects
-    objects = doc.Objects
+    # Get objects - filter if specified
+    all_objects = doc.Objects
+    if objects_filter is not None:
+        # Filter to only specified objects
+        objects_set = set(objects_filter)
+        objects = [obj for obj in all_objects if obj.Name in objects_set]
+        if objects_filter:  # Non-empty filter
+            lines.append(f"\n(Context filtered to {len(objects)} of {len(all_objects)} objects)")
+    else:
+        objects = all_objects
+
     if not objects:
-        lines.append("\nDocument is empty - ready for new design.")
+        if objects_filter is not None:
+            lines.append("\nNo objects in context selection.")
+        else:
+            lines.append("\nDocument is empty - ready for new design.")
         return "\n".join(lines)
 
     # Categorize objects by type
