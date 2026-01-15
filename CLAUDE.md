@@ -67,6 +67,30 @@ Each workbench follows this structure:
 - **CAM**: Computer-aided manufacturing
 - **TechDraw**: Technical drawing generation
 - **Draft/BIM**: 2D drafting and building information modeling
+- **AIAssistant**: Natural language CAD modeling assistant
+
+### AIAssistant Module (`src/Mod/AIAssistant/`)
+
+Natural language interface for creating 3D objects. Key components:
+
+- **AIPanel.py**: Main dock widget, orchestrates LLM requests and UI
+- **PreviewManager.py**: Executes code in sandbox temp document, shows green transparent preview
+- **PreviewWidget.py**: UI for approve/cancel preview actions
+- **ChangeWidget.py**: Displays created/modified/deleted objects after execution
+- **CodeBlockWidget.py**: Syntax-highlighted code display with Run button
+- **LLMBackend.py**: API communication with language model
+- **ContextBuilder.py**: Builds document context for LLM requests
+- **SessionManager.py**: Persists conversation history
+
+**Preview Flow**:
+1. User sends message → LLM returns code
+2. Code executes in temp document (sandbox)
+3. Shapes copied to main doc as green transparent preview
+4. User clicks "Approve & Create" → real execution
+5. ChangeWidget shows what was created/modified/deleted
+
+**Auto-Fix Feature**:
+When preview fails (e.g., code references non-existent objects), the error is automatically sent back to LLM for correction. This loops up to 3 times before falling back to showing the code block. User never sees the errors - just slightly longer "thinking..." animation.
 
 ### Key Patterns
 - **Property System**: Dynamic properties on DocumentObjects with expression support
