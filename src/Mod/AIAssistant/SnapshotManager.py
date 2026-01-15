@@ -3,7 +3,7 @@
 Snapshot Manager - Captures comprehensive object state to JSON files and Python scripts.
 
 Saves full object data to project folder on each AI request for future context enrichment.
-Storage: .freecad_ai/snapshots/ next to the FreeCAD document.
+Storage: {doc_stem}/.freecad_ai/snapshots/ in project subfolder.
 """
 
 import json
@@ -15,12 +15,16 @@ import FreeCADGui
 
 
 def get_snapshots_dir() -> Optional[Path]:
-    """Get snapshots directory next to the active document."""
+    """Get snapshots directory for the active document.
+
+    Uses project subfolder: {doc_stem}/.freecad_ai/snapshots/
+    """
     try:
         doc = FreeCAD.ActiveDocument
         if doc and doc.FileName:
             doc_path = Path(doc.FileName)
-            snapshots_dir = doc_path.parent / ".freecad_ai" / "snapshots"
+            # Create project subfolder: parent/doc_stem/.freecad_ai/snapshots/
+            snapshots_dir = doc_path.parent / doc_path.stem / ".freecad_ai" / "snapshots"
             snapshots_dir.mkdir(parents=True, exist_ok=True)
             return snapshots_dir
     except Exception:

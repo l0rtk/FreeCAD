@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """
 Session Manager - Persists chat sessions and debug data to local JSON files.
-Sessions are stored at project level (next to the FreeCAD document).
+Sessions are stored in a project subfolder: {doc_stem}/.freecad_ai/sessions/
 """
 
 import json
@@ -15,12 +15,16 @@ import FreeCAD
 
 
 def get_project_sessions_dir() -> Optional[Path]:
-    """Get sessions directory next to the active document, if saved."""
+    """Get sessions directory for the active document.
+
+    Uses project subfolder: {doc_stem}/.freecad_ai/sessions/
+    """
     try:
         doc = FreeCAD.ActiveDocument
         if doc and doc.FileName:
             doc_path = Path(doc.FileName)
-            sessions_dir = doc_path.parent / ".freecad_ai" / "sessions"
+            # Create project subfolder: parent/doc_stem/.freecad_ai/sessions/
+            sessions_dir = doc_path.parent / doc_path.stem / ".freecad_ai" / "sessions"
             sessions_dir.mkdir(parents=True, exist_ok=True)
             return sessions_dir
     except Exception:
@@ -39,7 +43,7 @@ def get_global_sessions_dir() -> Path:
 class SessionManager:
     """Manages chat session persistence to JSON files.
 
-    Sessions are stored next to the FreeCAD document in .freecad_ai/sessions/.
+    Sessions are stored in project subfolder: {doc_stem}/.freecad_ai/sessions/
     Falls back to global location if document is not saved.
     """
 

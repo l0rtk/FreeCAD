@@ -3,7 +3,10 @@
 Source Manager - Maintain generating Python script alongside FreeCAD document.
 
 Accumulates all successfully executed AI-generated code into a single Python
-file that can regenerate the document. This provides:
+file that can regenerate the document. Stored in project subfolder:
+  {doc_stem}/source.py
+
+This provides:
 1. Full context for the LLM when making modifications
 2. Version-controllable source of truth
 3. Ability to regenerate document from scratch
@@ -36,8 +39,11 @@ class _SourceManagerObserver:
         """Called when document save begins - initialize source file and flush pending code."""
         global _pending_code
 
-        # Build source path from the filename being saved to
-        source_path = Path(filename).with_name(f"{Path(filename).stem}_source.py")
+        # Build source path in project subfolder: parent/doc_stem/source.py
+        file_path = Path(filename)
+        project_dir = file_path.parent / file_path.stem
+        project_dir.mkdir(parents=True, exist_ok=True)
+        source_path = project_dir / "source.py"
 
         try:
             # Always ensure source file exists (proactive creation)
@@ -89,8 +95,7 @@ def get_source_path() -> Optional[Path]:
     """
     Get path to source file for active document.
 
-    The source file is named <document_stem>_source.py and stored
-    in the same directory as the .FCStd file.
+    The source file is stored in project subfolder: parent/doc_stem/source.py
 
     Returns:
         Path to source file, or None if document not saved
@@ -100,7 +105,7 @@ def get_source_path() -> Optional[Path]:
         return None
 
     doc_path = Path(doc.FileName)
-    return doc_path.with_name(f"{doc_path.stem}_source.py")
+    return doc_path.parent / doc_path.stem / "source.py"
 
 
 # Lines to strip from code blocks (already in header)
