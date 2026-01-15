@@ -341,6 +341,26 @@ class ChangeWidget(QtWidgets.QFrame):
         if code is None:
             code = self._get_code()
         if code:
+            # Disable the Run button to prevent multiple executions
+            if hasattr(self, '_run_btn'):
+                self._run_btn.setEnabled(False)
+                self._run_btn.setText("Executed")
+                self._run_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #21262d;
+                        color: #8b949e;
+                        border: 1px solid #30363d;
+                        border-radius: 6px;
+                        padding: 0 12px;
+                        font-size: 11px;
+                        font-weight: 500;
+                    }
+                """)
+
+            # Also disable the run button in the code widget if visible
+            if self._code_widget:
+                self._code_widget.set_run_disabled(True)
+
             self.runCodeRequested.emit(code)
 
 

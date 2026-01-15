@@ -226,6 +226,24 @@ class CodeBlockWidget(QtWidgets.QFrame):
         """Get the current code."""
         return self._code
 
+    def set_run_disabled(self, disabled: bool):
+        """Disable or enable the run button."""
+        if hasattr(self, '_run_btn'):
+            self._run_btn.setEnabled(not disabled)
+            if disabled:
+                self._run_btn.setText("Executed")
+                self._run_btn.setStyleSheet("""
+                    QPushButton {
+                        background-color: #21262d;
+                        color: #8b949e;
+                        border: 1px solid #30363d;
+                        border-radius: 6px;
+                        padding: 0 12px;
+                        font-size: 12px;
+                        font-weight: 500;
+                    }
+                """)
+
 
 class InlineCodeLabel(QtWidgets.QLabel):
     """Label styled for inline code."""
