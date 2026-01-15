@@ -15,6 +15,7 @@ from .ChangeDetector import ChangeSet
 from .ChangeWidget import ChangeWidget
 from .PreviewWidget import PreviewWidget
 from .PlanWidget import PlanWidget
+from .ActivityWidget import ActivityWidget
 from . import Theme
 
 
@@ -149,7 +150,8 @@ class ChatListWidget(QtWidgets.QScrollArea):
         return row
 
     def add_preview_message(self, description: str, preview_items: List[Dict], code: str,
-                            is_deletion: bool = False, auto_approve: bool = False):
+                            is_deletion: bool = False, auto_approve: bool = False,
+                            tool_calls: List[Dict] = None):
         """Add a preview message with approve/cancel buttons.
 
         Args:
@@ -158,7 +160,14 @@ class ChatListWidget(QtWidgets.QScrollArea):
             code: Python code to execute
             is_deletion: Whether this is a deletion preview
             auto_approve: If True, auto-approve after 500ms delay
+            tool_calls: Optional list of tool calls made during code generation
         """
+        # Show tool activity before preview (if any)
+        if tool_calls and len(tool_calls) > 0:
+            activity_widget = ActivityWidget(tool_calls)
+            self._layout.insertWidget(self._layout.count() - 1, activity_widget)
+            self._message_widgets.append(activity_widget)
+
         row = self._model.add_message(
             text=description,
             role=MessageRole.SYSTEM
@@ -222,6 +231,22 @@ class ChatListWidget(QtWidgets.QScrollArea):
         """Handle plan cancellation."""
         widget.set_disabled(True)
         self.planCancelled.emit()
+
+    def add_activity_message(self, tool_calls: List[Dict]):
+        """Add an activity widget showing tool calls.
+
+        Args:
+            tool_calls: List of dicts with 'tool' and 'input' keys
+        """
+        if not tool_calls:
+            return None
+
+        widget = ActivityWidget(tool_calls)
+        self._layout.insertWidget(self._layout.count() - 1, widget)
+        self._message_widgets.append(widget)
+
+        QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
+        return widget
 
     def _scroll_to_bottom(self):
         """Scroll to the bottom of the chat with smooth animation."""
@@ -470,8 +495,20 @@ class ChatWidget(QtWidgets.QWidget):
         """Add a user message programmatically."""
         self._chat_list.add_message(text, MessageRole.USER)
 
-    def add_assistant_message(self, text: str, stream: bool = True, debug_info: dict = None):
-        """Add an assistant message, optionally with streaming."""
+    def add_assistant_message(self, text: str, stream: bool = True, debug_info: dict = None,
+                              tool_calls: List[Dict] = None):
+        """Add an assistant message, optionally with streaming.
+
+        Args:
+            text: Message text
+            stream: Whether to use streaming animation
+            debug_info: Optional debug info dict
+            tool_calls: Optional list of tool calls to show in activity widget
+        """
+        # Add activity widget first if there are tool calls
+        if tool_calls:
+            self._chat_list.add_activity_message(tool_calls)
+
         if stream:
             self._pending_debug_info = debug_info
             self._streaming_row = self._chat_list.add_streaming_message(MessageRole.ASSISTANT)
@@ -492,9 +529,10 @@ class ChatWidget(QtWidgets.QWidget):
         self._chat_list.add_change_message(change_set)
 
     def add_preview_message(self, description: str, preview_items: List[Dict], code: str,
-                            is_deletion: bool = False, auto_approve: bool = False):
+                            is_deletion: bool = False, auto_approve: bool = False,
+                            tool_calls: List[Dict] = None):
         """Add a preview message with approve/cancel buttons."""
-        self._chat_list.add_preview_message(description, preview_items, code, is_deletion, auto_approve)
+        self._chat_list.add_preview_message(description, preview_items, code, is_deletion, auto_approve, tool_calls)
 
     def add_plan_message(self, plan_text: str, user_request: str = ""):
         """Add a plan message with approve/edit/cancel buttons."""

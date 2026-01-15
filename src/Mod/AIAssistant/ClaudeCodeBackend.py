@@ -13,7 +13,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict
 import FreeCAD
 
 
@@ -75,6 +75,7 @@ class ClaudeCodeBackend:
         self.last_system_prompt = ""
         self.last_context = ""
         self.last_conversation = []
+        self.last_tool_calls: List[Dict] = []  # Tool calls made during last request
 
     def chat(
         self,
@@ -106,8 +107,9 @@ class ClaudeCodeBackend:
         # Build the prompt
         prompt = self._build_prompt(user_message, context, screenshot_path)
 
-        # Build command
-        cmd = ["claude", "-p", "--output-format", "json"]
+        # Build command - use stream-json for tool visibility
+        # Note: stream-json requires --verbose when used with -p (print mode)
+        cmd = ["claude", "-p", "--verbose", "--output-format", "stream-json"]
 
         # Restrict to read-only tools for safety
         cmd.extend(["--allowedTools", "Read,Glob,Grep"])
@@ -131,56 +133,97 @@ class ClaudeCodeBackend:
 
         FreeCAD.Console.PrintMessage(f"AIAssistant: Calling Claude Code in {cwd}\n")
 
+        # Reset tool calls for this request
+        self.last_tool_calls = []
+
         start_time = time.time()
         try:
-            result = subprocess.run(
+            # Use Popen for streaming NDJSON output
+            process = subprocess.Popen(
                 cmd,
-                input=prompt,  # Pass prompt via stdin
-                capture_output=True,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 cwd=cwd,
-                timeout=180,
                 env={**os.environ}  # Inherit ANTHROPIC_API_KEY
             )
 
+            # Write prompt to stdin and close
+            process.stdin.write(prompt)
+            process.stdin.close()
+
+            # Parse NDJSON stream line by line
+            result_text = ""
+            tool_calls = []
+
+            for line in process.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                event_type = event.get("type")
+
+                # Extract tool_use from assistant messages
+                if event_type == "assistant":
+                    message = event.get("message", {})
+                    for block in message.get("content", []):
+                        if block.get("type") == "tool_use":
+                            tool_name = block.get("name", "")
+                            tool_input = block.get("input", {})
+                            tool_call = {
+                                "tool": tool_name,
+                                "input": tool_input
+                            }
+                            tool_calls.append(tool_call)
+                            # Log with details
+                            detail = self._format_tool_log(tool_name, tool_input)
+                            FreeCAD.Console.PrintMessage(
+                                f"AIAssistant: Tool call - {detail}\n"
+                            )
+
+                # Handle final result
+                elif event_type == "result":
+                    result_text = event.get("result", "")
+                    self._session_id = event.get("session_id")
+
+                    # Track cost
+                    self.last_cost = event.get("total_cost_usd", 0)
+
+                    # Check for error
+                    if event.get("is_error", False):
+                        error_msg = result_text or "Unknown error"
+                        FreeCAD.Console.PrintError(
+                            f"AIAssistant: Claude Code returned error: {error_msg}\n"
+                        )
+                        self.last_duration_ms = (time.time() - start_time) * 1000
+                        return f"# Error: {error_msg}"
+
+            # Wait for process to complete
+            process.wait(timeout=180)
             self.last_duration_ms = (time.time() - start_time) * 1000
 
-            if result.returncode != 0:
-                error_msg = result.stderr or result.stdout
-                FreeCAD.Console.PrintError(f"AIAssistant: Claude Code error: {error_msg}\n")
-                return f"# Error: {error_msg}"
+            # Store tool calls for UI access
+            self.last_tool_calls = tool_calls
 
-            # Parse JSON response
-            response_data = json.loads(result.stdout)
-
-            # Check for error
-            if response_data.get("is_error", False):
-                error_msg = response_data.get("result", "Unknown error")
-                FreeCAD.Console.PrintError(f"AIAssistant: Claude Code returned error: {error_msg}\n")
-                return f"# Error: {error_msg}"
-
-            # Store session ID for continuity
-            if "session_id" in response_data:
-                self._session_id = response_data["session_id"]
-
-            # Track cost (handle multiple formats from different Claude Code versions)
-            cost_data = response_data.get("cost", {})
-            self.last_cost = (
-                response_data.get("total_cost_usd")
-                or cost_data.get("total_cost")
-                or cost_data.get("total_cost_usd")
-                or 0
-            )
-
-            # Get the response text
-            response_text = response_data.get("result", "")
+            # Check for process errors
+            if process.returncode != 0:
+                stderr = process.stderr.read()
+                FreeCAD.Console.PrintError(f"AIAssistant: Claude Code error: {stderr}\n")
+                return f"# Error: {stderr}"
 
             FreeCAD.Console.PrintMessage(
                 f"AIAssistant: Claude Code response received "
-                f"({self.last_duration_ms:.0f}ms, ${self.last_cost:.4f})\n"
+                f"({self.last_duration_ms:.0f}ms, ${self.last_cost:.4f}, "
+                f"{len(tool_calls)} tool calls)\n"
             )
 
-            return self._clean_response(response_text)
+            return self._clean_response(result_text)
 
         except subprocess.TimeoutExpired:
             self.last_duration_ms = (time.time() - start_time) * 1000
@@ -278,6 +321,33 @@ class ClaudeCodeBackend:
             response = response[:-3]
 
         return response.strip()
+
+    def _format_tool_log(self, tool: str, input_data: dict) -> str:
+        """Format tool call for console logging with details."""
+        if tool == "Glob":
+            pattern = input_data.get("pattern", "")
+            return f"Glob: {pattern}"
+        elif tool == "Read":
+            path = input_data.get("file_path", "")
+            if len(path) > 60:
+                path = "..." + path[-57:]
+            return f"Read: {path}"
+        elif tool == "Grep":
+            pattern = input_data.get("pattern", "")
+            path = input_data.get("path", ".")
+            if len(path) > 30:
+                path = "..." + path[-27:]
+            return f"Grep: '{pattern}' in {path}"
+        elif tool == "Bash":
+            cmd = input_data.get("command", "")
+            if len(cmd) > 50:
+                cmd = cmd[:47] + "..."
+            return f"Bash: {cmd}"
+        elif tool == "Task":
+            desc = input_data.get("description", "")
+            return f"Task: {desc}"
+        else:
+            return f"{tool}"
 
     def _has_claude_md(self) -> bool:
         """Check if project has CLAUDE.md file.

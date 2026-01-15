@@ -168,7 +168,11 @@ class PreviewManager:
     def _create_sandbox_preview(self, code: str) -> tuple:
         """Execute code in temp doc and show preview in main doc.
 
-        This is the original creation preview path.
+        The sandbox first runs source.py to establish the baseline state,
+        then runs the LLM's new code on top. This ensures variables from
+        source.py (like `width`, `length`) are available.
+
+        Only NEW objects (created by LLM code) are shown as green preview.
 
         Args:
             code: Python code to execute
@@ -204,25 +208,58 @@ class PreviewManager:
             except ImportError:
                 pass
 
-            # Execute code in temp doc
             # Temporarily set temp doc as active
             FreeCAD.setActiveDocument(self._temp_doc.Name)
 
             try:
+                # STEP 1: Run source.py first to establish baseline
+                # This makes variables like `width`, `length` available to LLM code
+                from . import SourceManager
+                source_content = SourceManager.read_source()
+
+                baseline_objects = set()
+                if source_content and source_content.strip():
+                    FreeCAD.Console.PrintMessage(
+                        "AIAssistant: Running source.py in sandbox to establish baseline...\n"
+                    )
+                    exec(source_content, exec_globals)
+                    self._temp_doc.recompute()
+                    # Record baseline objects (from source.py)
+                    baseline_objects = set(
+                        obj.Name for obj in self._temp_doc.Objects
+                        if obj.TypeId not in ("App::Origin", "App::Plane", "App::Line")
+                    )
+                    FreeCAD.Console.PrintMessage(
+                        f"AIAssistant: Baseline has {len(baseline_objects)} objects\n"
+                    )
+
+                # STEP 2: Run LLM's new code on top of baseline
                 exec(code, exec_globals)
                 self._temp_doc.recompute()
+
             finally:
                 # ALWAYS restore original active document, even on failure
                 if self._main_doc_name and FreeCAD.getDocument(self._main_doc_name):
                     FreeCAD.setActiveDocument(self._main_doc_name)
 
+            # STEP 3: Identify NEW objects (created by LLM code, not in baseline)
+            all_objects = set(
+                obj.Name for obj in self._temp_doc.Objects
+                if obj.TypeId not in ("App::Origin", "App::Plane", "App::Line")
+            )
+            new_objects = all_objects - baseline_objects
+
             main_doc = FreeCAD.ActiveDocument
 
-            # Copy shapes to main doc as preview
+            # Copy only NEW shapes (from LLM code) to main doc as preview
             preview_count = 0
             for obj in self._temp_doc.Objects:
                 # Skip origin objects
                 if obj.TypeId in ("App::Origin", "App::Plane", "App::Line"):
+                    continue
+
+                # Only preview objects created by LLM code, not baseline from source.py
+                if obj.Name not in new_objects:
                     continue
 
                 if hasattr(obj, 'Shape') and obj.Shape and not obj.Shape.isNull():

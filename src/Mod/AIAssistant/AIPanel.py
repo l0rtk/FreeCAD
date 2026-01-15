@@ -607,12 +607,16 @@ Do NOT write any code. Only output the numbered plan steps."""
             # Check if auto-accept is enabled
             auto_approve = self.auto_accept_action.isChecked()
 
+            # Get tool calls from backend (if any)
+            tool_calls = getattr(self.llm, 'last_tool_calls', None)
+
             self._chat.add_preview_message(
                 description=description or default_desc,
                 preview_items=preview_items,
                 code=code,
                 is_deletion=is_deletion,
-                auto_approve=auto_approve
+                auto_approve=auto_approve,
+                tool_calls=tool_calls
             )
             return
 
@@ -779,7 +783,8 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
 
         # Display response with or without streaming
         use_streaming = self.streaming_action.isChecked()
-        self._chat.add_assistant_message(response, stream=use_streaming, debug_info=debug_info)
+        tool_calls = getattr(self.llm, 'last_tool_calls', None)
+        self._chat.add_assistant_message(response, stream=use_streaming, debug_info=debug_info, tool_calls=tool_calls)
 
     def _on_error(self, error_msg: str):
         """Handle LLM error."""
