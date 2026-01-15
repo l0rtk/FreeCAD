@@ -33,16 +33,20 @@ WORKFLOW:
 The source.py file is a Python script that generates FreeCAD geometry when executed.
 It is the single source of truth for the design.
 
-Code rules:
-- Use millimeters for dimensions
+## FreeCAD API Reference
+
+The FreeCAD API reference is included in the context (FREECAD_API.md). Use the correct method
+signatures from the reference - don't guess. Key patterns:
+- shape.makeFillet(radius, edgeList) returns NEW shape, doesn't modify in place
+- shape.makeChamfer(size, edgeList) returns NEW shape
+- Part.makeBox(), Part.makeCylinder() create primitive shapes
+- doc.addObject("Part::Feature", "Name") for computed shapes
+
+## Code Rules
+- Use millimeters for all dimensions
 - End code with doc.recompute()
 - Use descriptive Labels for objects
 - Use object Names (not Labels) when referencing in code
-
-FreeCAD API documentation (use Read tool with these paths if needed):
-- Part primitives: {repo_root}/src/Mod/Part/App/AppPartPy.cpp
-- Part type stubs: {repo_root}/src/Mod/Part/App/*.pyi
-- TopoShape: {repo_root}/src/Mod/Part/App/TopoShapePy.xml
 
 To ANSWER questions (not modify design): Return clear text explanation."""
 
@@ -125,8 +129,7 @@ class ClaudeCodeBackend:
         if not self._has_claude_md():
             source_path = self._get_source_path()
             system_prompt = FREECAD_SYSTEM_PROMPT_TEMPLATE.format(
-                source_path=source_path or "(no project)",
-                repo_root=self._repo_root or ""
+                source_path=source_path or "(no project)"
             )
             cmd.extend(["--append-system-prompt", system_prompt])
             self.last_system_prompt = system_prompt

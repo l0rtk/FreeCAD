@@ -10,6 +10,7 @@ from collections import deque
 from . import SnapshotManager
 from . import SourceManager
 from . import PartsLibrary
+import os
 
 
 # Global buffer for console messages (errors and warnings)
@@ -224,6 +225,25 @@ def _get_import_export_formats() -> str:
     return ""
 
 
+def _load_api_reference() -> str:
+    """Load the FreeCAD API reference from FREECAD_API.md.
+
+    This provides Claude with correct API signatures for Part module methods
+    so it doesn't have to guess at syntax.
+    """
+    try:
+        # Get path to FREECAD_API.md (same directory as this module)
+        module_dir = os.path.dirname(os.path.abspath(__file__))
+        api_file = os.path.join(module_dir, "FREECAD_API.md")
+
+        if os.path.exists(api_file):
+            with open(api_file, "r", encoding="utf-8") as f:
+                return f.read()
+    except Exception:
+        pass
+    return ""
+
+
 def build_context(objects_filter: list = None) -> str:
     """
     Build a detailed context string describing the current FreeCAD state.
@@ -253,6 +273,12 @@ def build_context(objects_filter: list = None) -> str:
     other_docs = _get_open_documents()
     if other_docs:
         lines.append(other_docs)
+
+    # === API REFERENCE (always include for correct method signatures) ===
+    api_ref = _load_api_reference()
+    if api_ref:
+        lines.append("")
+        lines.append(api_ref)
 
     lines.append("")  # Blank line before document section
 

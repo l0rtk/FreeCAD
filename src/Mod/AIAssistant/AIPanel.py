@@ -947,9 +947,17 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
                 else:
                     self._chat.add_change_message(change_set)
             else:
-                # Execution failed - restore backup
+                # Execution failed - restore backup AND re-execute to restore objects
                 FreeCAD.Console.PrintError(f"AIAssistant: Source execution failed: {message}\n")
                 SourceManager.restore_source()
+
+                # CRITICAL: Re-execute the restored source.py to restore document objects
+                # (we cleared them before the failed execution)
+                restored_source = SourceManager.read_source()
+                if restored_source:
+                    FreeCAD.Console.PrintMessage("AIAssistant: Re-executing backup to restore objects\n")
+                    CodeExecutor.execute(restored_source)
+
                 self._chat.add_error_message(f"Execution error: {message}")
         else:
             # Old-style patch flow: execute the code and show changes
