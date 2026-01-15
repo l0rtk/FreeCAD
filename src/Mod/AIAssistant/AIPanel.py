@@ -25,6 +25,7 @@ from . import Theme
 from .ChatWidget import ChatWidget
 from .SessionManager import SessionManager
 from .PreviewManager import PreviewManager
+from .ContextSelectionWidget import ContextSelectionWidget
 
 
 # Maximum attempts to auto-fix code that fails preview
@@ -73,9 +74,15 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
 
         self.worker = None
         self._fix_worker = None  # Worker for auto-fix requests
+        self._plan_worker = None  # Worker for plan mode phase 2
         self.pending_input = None
         self._last_code = ""
         self._last_screenshot = None  # Base64 PNG of last viewport capture
+
+        # Plan mode state
+        self._pending_plan = None  # Approved plan text for code generation
+        self._plan_user_request = None  # Original user request for plan
+        self._plan_mode_request = False  # True if current request is for plan (phase 1)
 
         # Session manager for persisting conversations
         self.session_manager = SessionManager()
@@ -198,6 +205,10 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
 
         layout.addWidget(header)
 
+        # Context selection widget (above chat)
+        self._context_widget = ContextSelectionWidget()
+        layout.addWidget(self._context_widget)
+
         # Chat widget
         self._chat = ChatWidget()
         layout.addWidget(self._chat, stretch=1)
@@ -239,6 +250,14 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self.autorun_action.setCheckable(True)
         self.autorun_action.setChecked(False)
 
+        self.auto_accept_action = menu.addAction("Auto-accept previews")
+        self.auto_accept_action.setCheckable(True)
+        self.auto_accept_action.setChecked(False)
+
+        self.plan_mode_action = menu.addAction("Plan mode (2-phase)")
+        self.plan_mode_action.setCheckable(True)
+        self.plan_mode_action.setChecked(False)
+
         self.streaming_action = menu.addAction("Streaming animation")
         self.streaming_action.setCheckable(True)
         self.streaming_action.setChecked(True)
@@ -261,6 +280,11 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self._chat.runCodeRequested.connect(self._on_run_code)
         self._chat.previewApproved.connect(self._on_preview_approved)
         self._chat.previewCancelled.connect(self._on_preview_cancelled)
+
+        # Plan mode signals
+        self._chat.planApproved.connect(self._on_plan_approved)
+        self._chat.planEdited.connect(self._on_plan_edited)
+        self._chat.planCancelled.connect(self._on_plan_cancelled)
 
         # Connect to session manager for auto-save
         self._chat._chat_list._model.message_added.connect(
@@ -443,10 +467,11 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         # Ensure source file exists for saved documents
         self._ensure_source_file()
 
-        # Build context if enabled
+        # Build context if enabled (using context widget selection)
         context = ""
         if self.context_action.isChecked():
-            context = ContextBuilder.build_context()
+            objects_filter = self._context_widget.get_context_objects()
+            context = ContextBuilder.build_context(objects_filter=objects_filter)
 
         # Capture object snapshot for future context enrichment (unique timestamp per request)
         from datetime import datetime
@@ -460,16 +485,39 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         # Get conversation history
         conversation = self._chat.get_conversation_history()
 
-        # Start background worker (include screenshot if available)
-        self.worker = LLMWorker(
-            self.llm, user_input, context, conversation, self._last_screenshot
-        )
+        # Check if plan mode is enabled
+        self._plan_mode_request = self.plan_mode_action.isChecked()
+
+        if self._plan_mode_request:
+            # Phase 1: Request plan only
+            self._plan_user_request = user_input
+            plan_prompt = f"""PLAN MODE: Analyze this request and create an execution plan.
+
+User request: {user_input}
+
+Output ONLY a plan in this format:
+## Plan
+1. **[Action]**: [Description of what will be created/modified]
+2. **[Action]**: [Description]
+...
+
+Do NOT write any code. Only output the numbered plan steps."""
+
+            self.worker = LLMWorker(
+                self.llm, plan_prompt, context, conversation, self._last_screenshot
+            )
+        else:
+            # Normal mode: request code directly
+            self.worker = LLMWorker(
+                self.llm, user_input, context, conversation, self._last_screenshot
+            )
+
         self.worker.finished.connect(self._on_response)
         self.worker.error.connect(self._on_error)
         self.worker.start()
 
     def _on_response(self, response: str):
-        """Handle successful LLM response - create preview."""
+        """Handle successful LLM response - create preview or show plan."""
         # Hide typing indicator
         self._chat.hide_typing()
         self._chat.set_input_enabled(True)
@@ -489,6 +537,14 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
             duration_ms=self.llm.last_duration_ms,
             success=True
         )
+
+        # Handle plan mode response (Phase 1)
+        if self._plan_mode_request:
+            self._plan_mode_request = False  # Reset flag
+            FreeCAD.Console.PrintMessage("AIAssistant: Plan mode - showing plan for approval\n")
+            self._chat.add_plan_message(response, self._plan_user_request or "")
+            self.pending_input = None
+            return
 
         # Parse description and code from response
         description, code = self._parse_response(response)
@@ -548,11 +604,15 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
             else:
                 default_desc = "I'll create the following objects:"
 
+            # Check if auto-accept is enabled
+            auto_approve = self.auto_accept_action.isChecked()
+
             self._chat.add_preview_message(
                 description=description or default_desc,
                 preview_items=preview_items,
                 code=code,
-                is_deletion=is_deletion
+                is_deletion=is_deletion,
+                auto_approve=auto_approve
             )
             return
 
@@ -750,6 +810,102 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
 
         # Add a system message
         self._chat.add_system_message("Preview cancelled")
+
+    def _on_plan_approved(self, plan_text: str):
+        """Handle plan approval - request code generation (Phase 2)."""
+        FreeCAD.Console.PrintMessage("AIAssistant: Plan approved - requesting code generation\n")
+        self._pending_plan = plan_text
+        self._generate_code_from_plan(plan_text)
+
+    def _on_plan_edited(self, edited_plan: str):
+        """Handle plan edit and approval - request code with edited plan."""
+        FreeCAD.Console.PrintMessage("AIAssistant: Plan edited and approved - requesting code generation\n")
+        self._pending_plan = edited_plan
+        self._generate_code_from_plan(edited_plan)
+
+    def _on_plan_cancelled(self):
+        """Handle plan cancellation."""
+        FreeCAD.Console.PrintMessage("AIAssistant: Plan cancelled\n")
+        self._pending_plan = None
+        self._plan_user_request = None
+        self._chat.add_system_message("Plan cancelled")
+
+    def _generate_code_from_plan(self, plan_text: str):
+        """Request code generation based on approved plan (Phase 2).
+
+        Args:
+            plan_text: The approved (or edited) plan text
+        """
+        # Prevent double-send
+        if self._plan_worker and self._plan_worker.isRunning():
+            return
+
+        # Show typing indicator
+        self._chat.show_typing()
+        self._chat.set_input_enabled(False)
+
+        # Build context (using context widget selection)
+        context = ""
+        if self.context_action.isChecked():
+            objects_filter = self._context_widget.get_context_objects()
+            context = ContextBuilder.build_context(objects_filter=objects_filter)
+
+        # Get conversation history
+        conversation = self._chat.get_conversation_history()
+
+        # Build prompt for code generation
+        code_prompt = f"""The user approved this execution plan:
+
+{plan_text}
+
+Original request: {self._plan_user_request or ""}
+
+Now write the FreeCAD Python code to implement this plan exactly as specified.
+Return ONLY the Python code in a ```python code block."""
+
+        # Start background worker for code generation
+        self._plan_worker = LLMWorker(
+            self.llm, code_prompt, context, conversation, self._last_screenshot
+        )
+        self._plan_worker.finished.connect(self._on_plan_code_response)
+        self._plan_worker.error.connect(self._on_error)
+        self._plan_worker.start()
+
+    def _on_plan_code_response(self, response: str):
+        """Handle code response from plan (Phase 2)."""
+        # Hide typing indicator
+        self._chat.hide_typing()
+        self._chat.set_input_enabled(True)
+
+        # Clear plan state
+        self._pending_plan = None
+        self._plan_user_request = None
+
+        # Store code for later execution
+        self._last_code = response
+
+        # Log the request
+        self.session_manager.log_llm_request(
+            user_message="[Plan Phase 2: Code Generation]",
+            system_prompt=self.llm.last_system_prompt,
+            context=self.llm.last_context,
+            conversation_history=self.llm.last_conversation,
+            response=response,
+            model=self.llm.model,
+            api_url=self.llm.api_url,
+            duration_ms=self.llm.last_duration_ms,
+            success=True
+        )
+
+        # Parse and show preview as normal
+        description, code = self._parse_response(response)
+
+        if not code.strip():
+            self._show_traditional_response(response)
+            return
+
+        # Create preview
+        self._attempt_preview_with_autofix(description, code, response)
 
     def _on_run_code(self, code: str, already_executed: bool = False):
         """Execute the provided code and display changes.
