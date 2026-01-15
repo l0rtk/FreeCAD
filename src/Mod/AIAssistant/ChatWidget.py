@@ -144,14 +144,15 @@ class ChatListWidget(QtWidgets.QScrollArea):
         QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
         return row
 
-    def add_preview_message(self, description: str, preview_items: List[Dict], code: str):
+    def add_preview_message(self, description: str, preview_items: List[Dict], code: str,
+                            is_deletion: bool = False):
         """Add a preview message with approve/cancel buttons."""
         row = self._model.add_message(
             text=description,
             role=MessageRole.SYSTEM
         )
 
-        widget = PreviewWidget(description, preview_items, code)
+        widget = PreviewWidget(description, preview_items, code, is_deletion=is_deletion)
         widget.approved.connect(lambda: self._on_preview_approved(code, widget))
         widget.cancelled.connect(lambda: self._on_preview_cancelled(widget))
 
@@ -433,9 +434,10 @@ class ChatWidget(QtWidgets.QWidget):
         """Add a change visualization message."""
         self._chat_list.add_change_message(change_set)
 
-    def add_preview_message(self, description: str, preview_items: List[Dict], code: str):
+    def add_preview_message(self, description: str, preview_items: List[Dict], code: str,
+                            is_deletion: bool = False):
         """Add a preview message with approve/cancel buttons."""
-        self._chat_list.add_preview_message(description, preview_items, code)
+        self._chat_list.add_preview_message(description, preview_items, code, is_deletion)
 
     def add_message_from_dict(self, msg_dict: dict, show_debug: bool = False):
         """Load a message from session JSON."""

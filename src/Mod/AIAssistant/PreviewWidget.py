@@ -1,16 +1,21 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """
-Preview Widget - Modern preview card showing objects to be created.
-Cursor-inspired design with blue accent and clean layout.
+Preview Widget - Modern preview card showing objects to be created or deleted.
+Cursor-inspired design with blue accent for creation, red for deletion.
 """
 
 from PySide6 import QtCore, QtWidgets, QtGui
 from typing import List, Dict
 from . import Theme
 
+# Deletion mode colors
+DELETION_ACCENT = "#ef4444"  # Red-500
+DELETION_ACCENT_HOVER = "#dc2626"  # Red-600
+DELETION_BG = "rgba(239, 68, 68, 0.08)"  # Light red bg
+
 
 class PreviewWidget(QtWidgets.QFrame):
-    """Widget showing preview of objects to be created with approve/cancel.
+    """Widget showing preview of objects to be created or deleted.
 
     Signals:
         approved: User clicked Approve - execute the code for real
@@ -22,20 +27,26 @@ class PreviewWidget(QtWidgets.QFrame):
     cancelled = QtCore.Signal()
     showCodeRequested = QtCore.Signal()
 
-    def __init__(self, description: str, preview_items: List[Dict], code: str = "", parent=None):
+    def __init__(self, description: str, preview_items: List[Dict], code: str = "",
+                 is_deletion: bool = False, parent=None):
         super().__init__(parent)
         self._code = code
         self._code_visible = False
+        self._is_deletion = is_deletion
         self._setup_ui(description, preview_items)
         self._setup_entry_animation()
 
     def _setup_ui(self, description: str, items: List[Dict]):
         """Set up the widget UI."""
         self.setObjectName("PreviewWidget")
+
+        # Different border color for deletion mode
+        border_color = DELETION_ACCENT if self._is_deletion else Theme.COLORS['preview_border']
+
         self.setStyleSheet(f"""
             #PreviewWidget {{
                 background-color: {Theme.COLORS['preview_bg']};
-                border: 1px solid {Theme.COLORS['preview_border']};
+                border: 1px solid {border_color};
                 border-radius: {Theme.RADIUS['lg']};
             }}
         """)
@@ -48,11 +59,15 @@ class PreviewWidget(QtWidgets.QFrame):
         header_layout = QtWidgets.QHBoxLayout()
         header_layout.setSpacing(10)
 
-        title_label = QtWidgets.QLabel("Preview")
+        # Different title for deletion mode
+        title_text = "Deletion Preview" if self._is_deletion else "Preview"
+        title_color = DELETION_ACCENT if self._is_deletion else Theme.COLORS['preview_text']
+
+        title_label = QtWidgets.QLabel(title_text)
         title_label.setStyleSheet(f"""
             font-size: {Theme.FONTS['size_sm']};
             font-weight: {Theme.FONTS['weight_semibold']};
-            color: {Theme.COLORS['preview_text']};
+            color: {title_color};
             background: transparent;
         """)
         header_layout.addWidget(title_label)
@@ -102,9 +117,12 @@ class PreviewWidget(QtWidgets.QFrame):
             items_layout.setContentsMargins(12, 10, 12, 10)
             items_layout.setSpacing(6)
 
-            count_label = QtWidgets.QLabel(f"{len(items)} object{'s' if len(items) > 1 else ''} to create")
+            # Different text for deletion mode
+            action = "delete" if self._is_deletion else "create"
+            count_label = QtWidgets.QLabel(f"{len(items)} object{'s' if len(items) > 1 else ''} to {action}")
+            count_color = DELETION_ACCENT if self._is_deletion else Theme.COLORS['text_muted']
             count_label.setStyleSheet(f"""
-                color: {Theme.COLORS['text_muted']};
+                color: {count_color};
                 font-size: {Theme.FONTS['size_xs']};
                 background: transparent;
             """)
@@ -172,12 +190,16 @@ class PreviewWidget(QtWidgets.QFrame):
 
         btn_layout.addStretch()
 
-        # Approve button - blue primary
-        approve_btn = QtWidgets.QPushButton("Approve & Create")
+        # Approve button - blue for create, red for delete
+        btn_text = "Approve & Delete" if self._is_deletion else "Approve & Create"
+        btn_color = DELETION_ACCENT if self._is_deletion else Theme.COLORS['accent_primary']
+        btn_hover = DELETION_ACCENT_HOVER if self._is_deletion else Theme.COLORS['accent_primary_hover']
+
+        approve_btn = QtWidgets.QPushButton(btn_text)
         approve_btn.setCursor(QtCore.Qt.PointingHandCursor)
         approve_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {Theme.COLORS['accent_primary']};
+                background-color: {btn_color};
                 color: white;
                 border: none;
                 border-radius: {Theme.RADIUS['sm']};
@@ -186,7 +208,7 @@ class PreviewWidget(QtWidgets.QFrame):
                 font-weight: {Theme.FONTS['weight_medium']};
             }}
             QPushButton:hover {{
-                background-color: {Theme.COLORS['accent_primary_hover']};
+                background-color: {btn_hover};
             }}
         """)
         approve_btn.clicked.connect(self._on_approve)
@@ -214,9 +236,10 @@ class PreviewWidget(QtWidgets.QFrame):
         layout.setContentsMargins(0, 2, 0, 2)
         layout.setSpacing(8)
 
-        # Blue dot icon
+        # Dot icon - red for deletion, blue for creation
+        icon_color = DELETION_ACCENT if self._is_deletion else Theme.COLORS['accent_primary']
         icon = QtWidgets.QLabel("●")
-        icon.setStyleSheet(f"color: {Theme.COLORS['accent_primary']}; font-size: 8px;")
+        icon.setStyleSheet(f"color: {icon_color}; font-size: 8px;")
         icon.setFixedWidth(12)
         layout.addWidget(icon)
 
@@ -230,13 +253,14 @@ class PreviewWidget(QtWidgets.QFrame):
         """)
         layout.addWidget(name_label)
 
-        # Type badge
+        # Type badge - red tint for deletion, blue for creation
         type_name = item.get("type", "")
         if type_name:
+            badge_bg = DELETION_BG if self._is_deletion else "rgba(59, 130, 246, 0.1)"
             type_label = QtWidgets.QLabel(type_name)
             type_label.setStyleSheet(f"""
                 color: {Theme.COLORS['text_muted']};
-                background-color: rgba(59, 130, 246, 0.1);
+                background-color: {badge_bg};
                 border-radius: 3px;
                 padding: 1px 6px;
                 font-size: {Theme.FONTS['size_xs']};

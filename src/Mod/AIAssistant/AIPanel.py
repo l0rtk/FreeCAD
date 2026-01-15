@@ -515,21 +515,44 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         if success:
             # Get preview summary
             preview_items = self._preview_manager.get_preview_summary()
-            FreeCAD.Console.PrintMessage(f"AIAssistant: Preview created with {len(preview_items)} objects\n")
+            is_deletion = self._preview_manager.is_deletion_preview()
+            FreeCAD.Console.PrintMessage(
+                f"AIAssistant: Preview created with {len(preview_items)} objects "
+                f"(deletion={is_deletion})\n"
+            )
 
             # Hide typing if shown during retry
             if attempt > 1:
                 self._chat.hide_typing()
 
-            # Show preview widget
+            # Show preview widget with appropriate description
+            if is_deletion:
+                default_desc = "I'll delete the following objects:"
+            else:
+                default_desc = "I'll create the following objects:"
+
             self._chat.add_preview_message(
-                description=description or "I'll create the following objects:",
+                description=description or default_desc,
                 preview_items=preview_items,
-                code=code
+                code=code,
+                is_deletion=is_deletion
             )
             return
 
-        # Preview failed
+        # Preview failed - check if this is a deletion operation
+        # Deletion failures should NOT trigger auto-fix (can't "fix" a non-existent object)
+        is_deletion_attempt = self._preview_manager.is_deletion_preview() or \
+                              bool(self._preview_manager._detect_deletion_targets(code))
+
+        if is_deletion_attempt:
+            # Deletion failed - show error to user, don't try to auto-fix
+            FreeCAD.Console.PrintWarning(f"AIAssistant: Deletion preview failed: {error_msg}\n")
+            self._chat.hide_typing()
+            self._preview_manager.clear_preview()
+            self._chat.add_error_message(f"Cannot delete: {error_msg}")
+            return
+
+        # Preview failed (creation) - try auto-fix
         if attempt >= MAX_FIX_ATTEMPTS:
             # Give up - show traditional code block
             FreeCAD.Console.PrintWarning(f"AIAssistant: Max auto-fix attempts reached, showing code block\n")
@@ -633,7 +656,16 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
 
         # No code block found - might be pure code or pure text
         # Check if it looks like Python code
-        if 'import FreeCAD' in response or 'Part.' in response or 'doc.addObject' in response:
+        code_indicators = [
+            'import FreeCAD',
+            'FreeCAD.',
+            'Part.',
+            'doc.addObject',
+            'doc.removeObject',  # Deletion operations
+            '.removeObject(',    # Alternative pattern
+            'doc.recompute()',   # Common ending
+        ]
+        if any(indicator in response for indicator in code_indicators):
             return ("", response.strip())
 
         # Pure text response
