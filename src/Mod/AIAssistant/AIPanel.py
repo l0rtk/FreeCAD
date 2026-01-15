@@ -15,7 +15,7 @@ FreeCAD.Console.PrintMessage("AIAssistant: AIPanel.py loaded (v3 modern design)\
 
 from pathlib import Path
 
-from . import LLMBackend
+from . import ClaudeCodeBackend
 from . import ContextBuilder
 from . import CodeExecutor
 from . import SnapshotManager
@@ -64,9 +64,12 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
             QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea
         )
 
-        # Initialize LLM backend (Claude Code or HTTP API)
+        # Initialize Claude Code backend
         self._project_dir = self._get_project_dir()
-        self.llm = self._create_llm_backend()
+        self.llm = ClaudeCodeBackend.ClaudeCodeBackend(self._project_dir)
+        FreeCAD.Console.PrintMessage(
+            f"AIAssistant: Using Claude Code backend (project: {self._project_dir})\n"
+        )
 
         self.worker = None
         self._fix_worker = None  # Worker for auto-fix requests
@@ -845,39 +848,6 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
                 )
             # Ensure CLAUDE.md exists in new project
             self._ensure_claude_md()
-
-    def _create_llm_backend(self):
-        """Create the appropriate LLM backend based on preferences.
-
-        Returns:
-            ClaudeCodeBackend if enabled and available, else LLMBackend
-        """
-        use_claude_code = self._get_pref_bool("UseClaudeCode", True)
-
-        if use_claude_code:
-            try:
-                from . import ClaudeCodeBackend
-                backend = ClaudeCodeBackend.ClaudeCodeBackend(self._project_dir)
-                FreeCAD.Console.PrintMessage(
-                    f"AIAssistant: Using Claude Code backend (project: {self._project_dir})\n"
-                )
-                return backend
-            except Exception as e:
-                FreeCAD.Console.PrintWarning(
-                    f"AIAssistant: Failed to init Claude Code backend, falling back to API: {e}\n"
-                )
-
-        FreeCAD.Console.PrintMessage("AIAssistant: Using HTTP API backend\n")
-        return LLMBackend.LLMBackend()
-
-    def _get_pref_bool(self, key: str, default: bool) -> bool:
-        """Get boolean preference value."""
-        try:
-            return FreeCAD.ParamGet(
-                "User parameter:BaseApp/Preferences/Mod/AIAssistant"
-            ).GetBool(key, default)
-        except Exception:
-            return default
 
     def _ensure_claude_md(self):
         """Ensure CLAUDE.md exists in project directory for Claude Code backend.

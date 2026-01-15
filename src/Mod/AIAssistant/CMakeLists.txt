@@ -7,7 +7,6 @@ SET(AIAssistant_SRCS
     InitGui.py
     __init__.py
     AIPanel.py
-    LLMBackend.py
     ClaudeCodeBackend.py
     ContextBuilder.py
     CodeExecutor.py
