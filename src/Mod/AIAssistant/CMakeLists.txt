@@ -8,6 +8,7 @@ SET(AIAssistant_SRCS
     __init__.py
     AIPanel.py
     LLMBackend.py
+    ClaudeCodeBackend.py
     ContextBuilder.py
     CodeExecutor.py
     ChatWidget.py
@@ -23,6 +24,8 @@ SET(AIAssistant_SRCS
     PreviewWidget.py
     PartsLibrary.py
     SourceManager.py
+    Theme.py
+    project_claude_template.md
 )
 
 SOURCE_GROUP("" FILES ${AIAssistant_SRCS})

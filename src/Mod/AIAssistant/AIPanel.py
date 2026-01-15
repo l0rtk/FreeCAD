@@ -13,6 +13,8 @@ from PySide6 import QtWidgets, QtCore, QtGui
 
 FreeCAD.Console.PrintMessage("AIAssistant: AIPanel.py loaded (v3 modern design)\n")
 
+from pathlib import Path
+
 from . import LLMBackend
 from . import ContextBuilder
 from . import CodeExecutor
@@ -62,7 +64,10 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
             QtCore.Qt.LeftDockWidgetArea | QtCore.Qt.RightDockWidgetArea
         )
 
-        self.llm = LLMBackend.LLMBackend()
+        # Initialize LLM backend (Claude Code or HTTP API)
+        self._project_dir = self._get_project_dir()
+        self.llm = self._create_llm_backend()
+
         self.worker = None
         self._fix_worker = None  # Worker for auto-fix requests
         self.pending_input = None
@@ -83,6 +88,9 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
 
         # Ensure source file exists for saved documents
         self._ensure_source_file()
+
+        # Ensure CLAUDE.md exists for Claude Code backend
+        self._ensure_claude_md()
 
     def _setup_ui(self):
         """Build the UI."""
@@ -425,6 +433,12 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         # Show typing indicator
         self._chat.show_typing()
         self._chat.set_input_enabled(False)
+
+        # Update project directory (handles document changes)
+        self._update_project_dir()
+
+        # Ensure source file exists for saved documents
+        self._ensure_source_file()
 
         # Build context if enabled
         context = ""
@@ -795,6 +809,102 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
         if current_id:
             # Reload current session with new debug mode setting
             self._on_load_session(current_id)
+
+    def _get_project_dir(self) -> str:
+        """Get project directory for Claude Code working directory.
+
+        Returns:
+            Path to project folder (parent/doc_stem/) or None if doc not saved
+        """
+        doc = FreeCAD.ActiveDocument
+        if doc and doc.FileName:
+            doc_path = Path(doc.FileName)
+            # Project folder: parent/doc_stem/
+            project_dir = doc_path.parent / doc_path.stem
+            # Create folder if needed (matches SourceManager/SessionManager pattern)
+            project_dir.mkdir(parents=True, exist_ok=True)
+            return str(project_dir)
+        return None
+
+    def _update_project_dir(self):
+        """Update project directory when document changes.
+
+        Called before each LLM request to handle:
+        - Document opened after panel created
+        - Document saved to new location
+        - Switching between documents
+        """
+        new_dir = self._get_project_dir()
+        if new_dir and new_dir != self._project_dir:
+            self._project_dir = new_dir
+            # Update backend's project_dir if it supports it
+            if hasattr(self.llm, 'project_dir'):
+                self.llm.project_dir = new_dir
+                FreeCAD.Console.PrintMessage(
+                    f"AIAssistant: Project directory updated to {new_dir}\n"
+                )
+            # Ensure CLAUDE.md exists in new project
+            self._ensure_claude_md()
+
+    def _create_llm_backend(self):
+        """Create the appropriate LLM backend based on preferences.
+
+        Returns:
+            ClaudeCodeBackend if enabled and available, else LLMBackend
+        """
+        use_claude_code = self._get_pref_bool("UseClaudeCode", True)
+
+        if use_claude_code:
+            try:
+                from . import ClaudeCodeBackend
+                backend = ClaudeCodeBackend.ClaudeCodeBackend(self._project_dir)
+                FreeCAD.Console.PrintMessage(
+                    f"AIAssistant: Using Claude Code backend (project: {self._project_dir})\n"
+                )
+                return backend
+            except Exception as e:
+                FreeCAD.Console.PrintWarning(
+                    f"AIAssistant: Failed to init Claude Code backend, falling back to API: {e}\n"
+                )
+
+        FreeCAD.Console.PrintMessage("AIAssistant: Using HTTP API backend\n")
+        return LLMBackend.LLMBackend()
+
+    def _get_pref_bool(self, key: str, default: bool) -> bool:
+        """Get boolean preference value."""
+        try:
+            return FreeCAD.ParamGet(
+                "User parameter:BaseApp/Preferences/Mod/AIAssistant"
+            ).GetBool(key, default)
+        except Exception:
+            return default
+
+    def _ensure_claude_md(self):
+        """Ensure CLAUDE.md exists in project directory for Claude Code backend.
+
+        If using Claude Code and project dir exists but has no CLAUDE.md,
+        copy the template file.
+        """
+        if not self._project_dir:
+            return
+
+        claude_md_path = Path(self._project_dir) / "CLAUDE.md"
+        if claude_md_path.exists():
+            return
+
+        # Copy template
+        try:
+            template_path = Path(__file__).parent / "project_claude_template.md"
+            if template_path.exists():
+                import shutil
+                shutil.copy(template_path, claude_md_path)
+                FreeCAD.Console.PrintMessage(
+                    f"AIAssistant: Created CLAUDE.md in {self._project_dir}\n"
+                )
+        except Exception as e:
+            FreeCAD.Console.PrintWarning(
+                f"AIAssistant: Failed to create CLAUDE.md: {e}\n"
+            )
 
     def _ensure_source_file(self):
         """
