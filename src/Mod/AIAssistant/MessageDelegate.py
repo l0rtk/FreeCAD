@@ -370,6 +370,22 @@ class MessageCard(QtWidgets.QFrame):
                 self._code_widgets.append(code_widget)
                 self._content_layout.addWidget(code_widget)
 
+        # Fallback: if no widgets were added and message is not streaming, show placeholder
+        # For streaming messages with empty text, we skip this (text will come later)
+        if self._content_layout.count() == 0 and not self._message.is_streaming:
+            display_text = text.strip() if text.strip() else "(No response)"
+            label = QtWidgets.QLabel(display_text)
+            label.setWordWrap(True)
+            label.setStyleSheet(f"""
+                QLabel {{
+                    color: {Theme.COLORS['assistant_text']};
+                    font-size: {Theme.FONTS['size_base']};
+                    background: transparent;
+                }}
+            """)
+            self._content_layout.addWidget(label)
+            self._text_label = label
+
     def _looks_like_pure_code(self, text: str) -> bool:
         """Check if text appears to be pure code."""
         text = text.strip()

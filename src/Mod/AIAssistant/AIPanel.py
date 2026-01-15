@@ -559,6 +559,12 @@ Do NOT write any code. Only output the numbered plan steps."""
         # Claude didn't edit source.py - clear backup so patch flow is used on approve
         SourceManager.clear_backup()
 
+        # Debug: log response content for text-only responses
+        FreeCAD.Console.PrintMessage(
+            f"AIAssistant: Text response length: {len(response)}, "
+            f"preview: {response[:100] if response else '(empty)'}...\n"
+        )
+
         # Parse description and code from response
         description, code = self._parse_response(response)
 

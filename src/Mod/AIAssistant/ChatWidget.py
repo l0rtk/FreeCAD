@@ -73,8 +73,12 @@ class ChatListWidget(QtWidgets.QScrollArea):
         QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
         return row
 
-    def add_streaming_message(self, role: str) -> int:
-        """Add a message that will be streamed."""
+    def add_streaming_message(self, role: str) -> tuple:
+        """Add a message that will be streamed.
+
+        Returns:
+            Tuple of (row, widget) - row is model index, widget is the MessageCard
+        """
         row = self._model.add_message("", role, is_streaming=True)
         message = self._model.get_message(row)
         widget = MessageCard(message)
@@ -84,7 +88,7 @@ class ChatListWidget(QtWidgets.QScrollArea):
         self._message_widgets.append(widget)
 
         QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
-        return row
+        return (row, widget)
 
     def update_streaming_message(self, row: int, text: str, is_complete: bool = False):
         """Update a streaming message with new text."""
@@ -359,6 +363,7 @@ class ChatWidget(QtWidgets.QWidget):
         super().__init__(parent)
         self._streaming_controller = StreamingController(self)
         self._streaming_row = -1
+        self._streaming_widget = None  # Track actual widget, not just row index
         self._pending_debug_info = None
         self._setup_ui()
         self._connect_signals()
@@ -513,7 +518,7 @@ class ChatWidget(QtWidgets.QWidget):
 
         if stream:
             self._pending_debug_info = debug_info
-            self._streaming_row = self._chat_list.add_streaming_message(MessageRole.ASSISTANT)
+            self._streaming_row, self._streaming_widget = self._chat_list.add_streaming_message(MessageRole.ASSISTANT)
             self._streaming_controller.start_streaming(text)
         else:
             self._chat_list.add_message(text, MessageRole.ASSISTANT, debug_info=debug_info)
@@ -585,27 +590,35 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _on_character_revealed(self, text: str):
         """Handle character reveal during streaming."""
-        if self._streaming_row >= 0:
-            self._chat_list.update_streaming_message(self._streaming_row, text)
+        # Use the actual widget reference, not row index (which can be wrong with activity widgets)
+        if self._streaming_widget and hasattr(self._streaming_widget, 'update_displayed_text'):
+            self._streaming_widget.update_displayed_text(text)
+            # Also update the model
+            if self._streaming_row >= 0:
+                self._chat_list._model.update_message(self._streaming_row, text=text, displayed_text=text)
+            QtCore.QTimer.singleShot(50, self._chat_list._scroll_to_bottom)
 
     def _on_streaming_complete(self):
         """Handle streaming completion."""
-        if self._streaming_row >= 0:
-            message = self._chat_list._model.get_message(self._streaming_row)
-            if message:
-                self._chat_list.update_streaming_message(
-                    self._streaming_row,
-                    message.text,
-                    is_complete=True
-                )
+        if self._streaming_widget:
+            # Mark streaming complete in the model
+            if self._streaming_row >= 0:
+                message = self._chat_list._model.get_message(self._streaming_row)
+                if message:
+                    self._chat_list._model.update_message(
+                        self._streaming_row,
+                        text=message.text,
+                        displayed_text=message.text,
+                        is_streaming=False
+                    )
 
-            widget_count = len(self._chat_list._message_widgets)
-            if self._pending_debug_info and self._streaming_row < widget_count:
-                widget = self._chat_list._message_widgets[self._streaming_row]
-                widget.add_debug_info(self._pending_debug_info)
+            # Add debug info if present
+            if self._pending_debug_info and hasattr(self._streaming_widget, 'add_debug_info'):
+                self._streaming_widget.add_debug_info(self._pending_debug_info)
                 self._pending_debug_info = None
 
         self._streaming_row = -1
+        self._streaming_widget = None
 
     def skip_streaming(self):
         """Skip current streaming animation."""

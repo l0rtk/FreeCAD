@@ -209,6 +209,12 @@ class ClaudeCodeBackend:
                     result_text = event.get("result", "")
                     self._session_id = event.get("session_id")
 
+                    # Debug: log result content
+                    FreeCAD.Console.PrintMessage(
+                        f"AIAssistant: Result event - length: {len(result_text)}, "
+                        f"preview: {result_text[:100] if result_text else '(empty)'}...\n"
+                    )
+
                     # Track cost
                     self.last_cost = event.get("total_cost_usd", 0)
 
