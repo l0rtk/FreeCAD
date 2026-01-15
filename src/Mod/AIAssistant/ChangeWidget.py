@@ -1,35 +1,34 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """
-Change Widget - Displays document changes with color-coded visualization.
-
-Shows created (green), modified (blue), and deleted (red) objects
-with human-readable descriptions and collapsible code section.
+Change Widget - Modern change visualization with color-coded items.
+Shows created (green), modified (blue), and deleted (red) objects.
 """
 
 from PySide6 import QtWidgets, QtCore, QtGui
 from typing import Dict, List, Optional, Union
 from .ChangeDetector import ChangeSet, ObjectChange
+from . import Theme
 
 
-# Color palette matching the existing UI
+# Color palette for change types
 CHANGE_COLORS = {
     "created": {
-        "icon": "\u2713",  # Checkmark
-        "bg": "rgba(16, 185, 129, 0.1)",
-        "border": "#10b981",
-        "text": "#10b981",
+        "icon": "+",
+        "bg": Theme.COLORS['change_created_bg'],
+        "border": Theme.COLORS['change_created'],
+        "text": Theme.COLORS['change_created'],
     },
     "modified": {
-        "icon": "\u21bb",  # Clockwise arrow
-        "bg": "rgba(88, 166, 255, 0.1)",
-        "border": "#58a6ff",
-        "text": "#58a6ff",
+        "icon": "~",
+        "bg": Theme.COLORS['change_modified_bg'],
+        "border": Theme.COLORS['change_modified'],
+        "text": Theme.COLORS['change_modified'],
     },
     "deleted": {
-        "icon": "\u2717",  # Cross mark
-        "bg": "rgba(248, 113, 113, 0.1)",
-        "border": "#f87171",
-        "text": "#f87171",
+        "icon": "-",
+        "bg": Theme.COLORS['change_deleted_bg'],
+        "border": Theme.COLORS['change_deleted'],
+        "text": Theme.COLORS['change_deleted'],
     },
 }
 
@@ -44,7 +43,6 @@ class ChangeItemWidget(QtWidgets.QFrame):
 
     def _setup_ui(self):
         """Build the widget UI."""
-        # Get change type and colors
         if isinstance(self._change, ObjectChange):
             change_type = self._change.change_type
             display_text = self._change.to_string()
@@ -57,28 +55,27 @@ class ChangeItemWidget(QtWidgets.QFrame):
         self.setStyleSheet(f"""
             ChangeItemWidget {{
                 background-color: {colors['bg']};
-                border-left: 3px solid {colors['border']};
-                border-radius: 4px;
-                padding: 4px 8px;
-                margin: 2px 0;
+                border-left: 2px solid {colors['border']};
+                border-radius: {Theme.RADIUS['xs']};
             }}
         """)
 
         layout = QtWidgets.QHBoxLayout(self)
-        layout.setContentsMargins(8, 6, 8, 6)
-        layout.setSpacing(8)
+        layout.setContentsMargins(10, 6, 10, 6)
+        layout.setSpacing(10)
 
         # Icon
         icon_label = QtWidgets.QLabel(colors["icon"])
         icon_label.setStyleSheet(f"""
             QLabel {{
                 color: {colors['text']};
-                font-size: 14px;
-                font-weight: bold;
+                font-size: {Theme.FONTS['size_base']};
+                font-weight: {Theme.FONTS['weight_bold']};
+                font-family: {Theme.FONTS['family_mono']};
                 background: transparent;
             }}
         """)
-        icon_label.setFixedWidth(20)
+        icon_label.setFixedWidth(16)
         layout.addWidget(icon_label)
 
         # Text
@@ -86,7 +83,7 @@ class ChangeItemWidget(QtWidgets.QFrame):
         text_label.setStyleSheet(f"""
             QLabel {{
                 color: {colors['text']};
-                font-size: 13px;
+                font-size: {Theme.FONTS['size_sm']};
                 background: transparent;
             }}
         """)
@@ -106,15 +103,16 @@ class ChangeWidget(QtWidgets.QFrame):
         self._code_visible = False
         self._code_widget = None
         self._setup_ui()
+        self._setup_entry_animation()
 
     def _setup_ui(self):
         """Build the widget UI."""
-        self.setStyleSheet("""
-            ChangeWidget {
-                background-color: #161b22;
-                border: 1px solid #30363d;
-                border-radius: 8px;
-            }
+        self.setStyleSheet(f"""
+            ChangeWidget {{
+                background-color: {Theme.COLORS['bg_secondary']};
+                border: 1px solid {Theme.COLORS['border_subtle']};
+                border-radius: {Theme.RADIUS['lg']};
+            }}
         """)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -123,83 +121,76 @@ class ChangeWidget(QtWidgets.QFrame):
 
         # Header
         header = QtWidgets.QWidget()
-        header.setStyleSheet("""
-            QWidget {
-                background-color: #1c2128;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
-                border-bottom: 1px solid #30363d;
-            }
+        header.setStyleSheet(f"""
+            QWidget {{
+                background-color: {Theme.COLORS['bg_tertiary']};
+                border-top-left-radius: {Theme.RADIUS['lg']};
+                border-top-right-radius: {Theme.RADIUS['lg']};
+                border-bottom: 1px solid {Theme.COLORS['border_subtle']};
+            }}
         """)
-        header.setFixedHeight(36)
+        header.setFixedHeight(40)
         header_layout = QtWidgets.QHBoxLayout(header)
-        header_layout.setContentsMargins(12, 0, 8, 0)
-        header_layout.setSpacing(8)
+        header_layout.setContentsMargins(14, 0, 10, 0)
+        header_layout.setSpacing(10)
 
-        # Title with change count
-        total = self._get_total_changes()
-        title_text = f"Changes Applied ({total})" if total > 0 else "No Changes"
-        title_label = QtWidgets.QLabel(title_text)
-        title_label.setStyleSheet("""
-            QLabel {
-                color: #c9d1d9;
-                font-size: 12px;
-                font-weight: 600;
+        # Title with inline count badges
+        title_label = QtWidgets.QLabel("Changes")
+        title_label.setStyleSheet(f"""
+            QLabel {{
+                color: {Theme.COLORS['text_primary']};
+                font-size: {Theme.FONTS['size_sm']};
+                font-weight: {Theme.FONTS['weight_semibold']};
                 background: transparent;
-            }
+            }}
         """)
         header_layout.addWidget(title_label)
 
+        # Add inline count badges
+        self._add_count_badges(header_layout)
+
         header_layout.addStretch()
 
-        # Show/Hide code button
-        self._toggle_btn = QtWidgets.QPushButton("\u25b6 Show Code")
+        # Show/Hide code button - chevron style
+        self._toggle_btn = QtWidgets.QPushButton("Code")
         self._toggle_btn.setCursor(QtCore.Qt.PointingHandCursor)
         self._toggle_btn.setFixedHeight(26)
-        self._toggle_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #21262d;
-                color: #8b949e;
-                border: 1px solid #30363d;
-                border-radius: 6px;
-                padding: 0 12px;
-                font-size: 11px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background-color: #30363d;
-                color: #c9d1d9;
-                border-color: #8b949e;
-            }
-            QPushButton:pressed {
-                background-color: #484f58;
-            }
+        self._toggle_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {Theme.COLORS['text_secondary']};
+                border: 1px solid {Theme.COLORS['border_default']};
+                border-radius: {Theme.RADIUS['xs']};
+                padding: 0 10px;
+                font-size: {Theme.FONTS['size_xs']};
+            }}
+            QPushButton:hover {{
+                background-color: {Theme.COLORS['bg_hover']};
+                color: {Theme.COLORS['text_primary']};
+            }}
         """)
         self._toggle_btn.clicked.connect(self._toggle_code)
         header_layout.addWidget(self._toggle_btn)
 
-        # Run button
+        # Run button - blue
         code = self._get_code()
         if code:
             self._run_btn = QtWidgets.QPushButton("Run")
             self._run_btn.setCursor(QtCore.Qt.PointingHandCursor)
             self._run_btn.setFixedHeight(26)
-            self._run_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #238636;
+            self._run_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Theme.COLORS['accent_primary']};
                     color: #ffffff;
-                    border: 1px solid #2ea043;
-                    border-radius: 6px;
+                    border: none;
+                    border-radius: {Theme.RADIUS['xs']};
                     padding: 0 12px;
-                    font-size: 11px;
-                    font-weight: 500;
-                }
-                QPushButton:hover {
-                    background-color: #2ea043;
-                }
-                QPushButton:pressed {
-                    background-color: #238636;
-                }
+                    font-size: {Theme.FONTS['size_xs']};
+                    font-weight: {Theme.FONTS['weight_medium']};
+                }}
+                QPushButton:hover {{
+                    background-color: {Theme.COLORS['accent_primary_hover']};
+                }}
             """)
             self._run_btn.clicked.connect(self._on_run)
             header_layout.addWidget(self._run_btn)
@@ -208,14 +199,14 @@ class ChangeWidget(QtWidgets.QFrame):
 
         # Changes content
         content = QtWidgets.QWidget()
-        content.setStyleSheet("""
-            QWidget {
-                background-color: #0d1117;
-            }
+        content.setStyleSheet(f"""
+            QWidget {{
+                background-color: {Theme.COLORS['bg_primary']};
+            }}
         """)
         self._content_layout = QtWidgets.QVBoxLayout(content)
-        self._content_layout.setContentsMargins(12, 12, 12, 12)
-        self._content_layout.setSpacing(4)
+        self._content_layout.setContentsMargins(14, 12, 14, 12)
+        self._content_layout.setSpacing(6)
 
         # Add change items
         self._add_change_items()
@@ -225,34 +216,75 @@ class ChangeWidget(QtWidgets.QFrame):
         # Code section (initially hidden)
         self._code_container = QtWidgets.QWidget()
         self._code_container.setVisible(False)
-        self._code_container.setStyleSheet("""
-            QWidget {
-                background-color: #0d1117;
-                border-top: 1px solid #30363d;
-                border-bottom-left-radius: 8px;
-                border-bottom-right-radius: 8px;
-            }
+        self._code_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {Theme.COLORS['bg_primary']};
+                border-top: 1px solid {Theme.COLORS['border_subtle']};
+                border-bottom-left-radius: {Theme.RADIUS['lg']};
+                border-bottom-right-radius: {Theme.RADIUS['lg']};
+            }}
         """)
         code_layout = QtWidgets.QVBoxLayout(self._code_container)
         code_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Create code display
-        code = self._get_code()
         if code:
             from .CodeBlockWidget import CodeBlockWidget
             self._code_widget = CodeBlockWidget(code, "python")
-            self._code_widget.setStyleSheet("""
-                CodeBlockWidget {
+            self._code_widget.setStyleSheet(f"""
+                CodeBlockWidget {{
                     border: none;
                     border-radius: 0;
-                    border-bottom-left-radius: 8px;
-                    border-bottom-right-radius: 8px;
-                }
+                    border-bottom-left-radius: {Theme.RADIUS['lg']};
+                    border-bottom-right-radius: {Theme.RADIUS['lg']};
+                }}
             """)
             self._code_widget.runRequested.connect(self._on_run)
             code_layout.addWidget(self._code_widget)
 
         layout.addWidget(self._code_container)
+
+    def _setup_entry_animation(self):
+        """Setup fade-in animation."""
+        self._opacity_effect = QtWidgets.QGraphicsOpacityEffect(self)
+        self.setGraphicsEffect(self._opacity_effect)
+        self._opacity_effect.setOpacity(0.0)
+
+        self._fade_anim = QtCore.QPropertyAnimation(self._opacity_effect, b"opacity")
+        self._fade_anim.setDuration(Theme.ANIMATION['duration_normal'])
+        self._fade_anim.setStartValue(0.0)
+        self._fade_anim.setEndValue(1.0)
+        self._fade_anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+        self._fade_anim.start()
+
+    def _add_count_badges(self, layout):
+        """Add inline count badges to header."""
+        if isinstance(self._change_set, ChangeSet):
+            created = len(self._change_set.created)
+            modified = len(self._change_set.modified)
+            deleted = len(self._change_set.deleted)
+        elif isinstance(self._change_set, dict):
+            created = len(self._change_set.get("created", []))
+            modified = len(self._change_set.get("modified", []))
+            deleted = len(self._change_set.get("deleted", []))
+        else:
+            return
+
+        for count, colors_key in [(created, "created"), (modified, "modified"), (deleted, "deleted")]:
+            if count > 0:
+                colors = CHANGE_COLORS[colors_key]
+                badge = QtWidgets.QLabel(f"{colors['icon']}{count}")
+                badge.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {colors['bg']};
+                        color: {colors['text']};
+                        padding: 2px 6px;
+                        border-radius: 4px;
+                        font-size: {Theme.FONTS['size_xs']};
+                        font-weight: {Theme.FONTS['weight_semibold']};
+                        font-family: {Theme.FONTS['family_mono']};
+                    }}
+                """)
+                layout.addWidget(badge)
 
     def _get_total_changes(self) -> int:
         """Get total number of changes."""
@@ -277,49 +309,40 @@ class ChangeWidget(QtWidgets.QFrame):
     def _add_change_items(self):
         """Add change item widgets to the content layout."""
         if isinstance(self._change_set, ChangeSet):
-            # Add created items
             for change in self._change_set.created:
                 item = ChangeItemWidget(change)
                 self._content_layout.addWidget(item)
-
-            # Add modified items
             for change in self._change_set.modified:
                 item = ChangeItemWidget(change)
                 self._content_layout.addWidget(item)
-
-            # Add deleted items
             for change in self._change_set.deleted:
                 item = ChangeItemWidget(change)
                 self._content_layout.addWidget(item)
 
         elif isinstance(self._change_set, dict):
-            # Handle dict format (from persistence)
             for change_data in self._change_set.get("created", []):
                 change_data["change_type"] = "created"
                 item = ChangeItemWidget(change_data)
                 self._content_layout.addWidget(item)
-
             for change_data in self._change_set.get("modified", []):
                 change_data["change_type"] = "modified"
                 item = ChangeItemWidget(change_data)
                 self._content_layout.addWidget(item)
-
             for change_data in self._change_set.get("deleted", []):
                 change_data["change_type"] = "deleted"
                 item = ChangeItemWidget(change_data)
                 self._content_layout.addWidget(item)
 
-        # Show "no changes" message if empty
         if self._get_total_changes() == 0:
             no_changes = QtWidgets.QLabel("No changes detected")
-            no_changes.setStyleSheet("""
-                QLabel {
-                    color: #8b949e;
-                    font-size: 13px;
+            no_changes.setStyleSheet(f"""
+                QLabel {{
+                    color: {Theme.COLORS['text_muted']};
+                    font-size: {Theme.FONTS['size_sm']};
                     font-style: italic;
                     background: transparent;
                     padding: 8px;
-                }
+                }}
             """)
             no_changes.setAlignment(QtCore.Qt.AlignCenter)
             self._content_layout.addWidget(no_changes)
@@ -328,12 +351,7 @@ class ChangeWidget(QtWidgets.QFrame):
         """Toggle code visibility."""
         self._code_visible = not self._code_visible
         self._code_container.setVisible(self._code_visible)
-
-        if self._code_visible:
-            self._toggle_btn.setText("\u25bc Hide Code")
-        else:
-            self._toggle_btn.setText("\u25b6 Show Code")
-
+        self._toggle_btn.setText("Hide" if self._code_visible else "Code")
         self.showCodeRequested.emit()
 
     def _on_run(self, code: str = None):
@@ -341,23 +359,20 @@ class ChangeWidget(QtWidgets.QFrame):
         if code is None:
             code = self._get_code()
         if code:
-            # Disable the Run button to prevent multiple executions
             if hasattr(self, '_run_btn'):
                 self._run_btn.setEnabled(False)
-                self._run_btn.setText("Executed")
-                self._run_btn.setStyleSheet("""
-                    QPushButton {
-                        background-color: #21262d;
-                        color: #8b949e;
-                        border: 1px solid #30363d;
-                        border-radius: 6px;
+                self._run_btn.setText("Done")
+                self._run_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {Theme.COLORS['bg_tertiary']};
+                        color: {Theme.COLORS['text_muted']};
+                        border: none;
+                        border-radius: {Theme.RADIUS['xs']};
                         padding: 0 12px;
-                        font-size: 11px;
-                        font-weight: 500;
-                    }
+                        font-size: {Theme.FONTS['size_xs']};
+                    }}
                 """)
 
-            # Also disable the run button in the code widget if visible
             if self._code_widget:
                 self._code_widget.set_run_disabled(True)
 
@@ -374,17 +389,12 @@ class ChangesSummaryWidget(QtWidgets.QFrame):
 
     def _setup_ui(self):
         """Build the widget UI."""
-        self.setStyleSheet("""
-            ChangesSummaryWidget {
-                background-color: transparent;
-            }
-        """)
+        self.setStyleSheet("background-color: transparent;")
 
         layout = QtWidgets.QHBoxLayout(self)
         layout.setContentsMargins(0, 4, 0, 4)
-        layout.setSpacing(12)
+        layout.setSpacing(8)
 
-        # Get counts
         if isinstance(self._change_set, ChangeSet):
             created = len(self._change_set.created)
             modified = len(self._change_set.modified)
@@ -396,32 +406,24 @@ class ChangesSummaryWidget(QtWidgets.QFrame):
         else:
             created = modified = deleted = 0
 
-        # Add count badges
-        if created > 0:
-            badge = self._create_badge(f"+{created}", CHANGE_COLORS["created"])
-            layout.addWidget(badge)
-
-        if modified > 0:
-            badge = self._create_badge(f"~{modified}", CHANGE_COLORS["modified"])
-            layout.addWidget(badge)
-
-        if deleted > 0:
-            badge = self._create_badge(f"-{deleted}", CHANGE_COLORS["deleted"])
-            layout.addWidget(badge)
+        for count, colors_key, prefix in [
+            (created, "created", "+"),
+            (modified, "modified", "~"),
+            (deleted, "deleted", "-")
+        ]:
+            if count > 0:
+                colors = CHANGE_COLORS[colors_key]
+                badge = QtWidgets.QLabel(f"{prefix}{count}")
+                badge.setStyleSheet(f"""
+                    QLabel {{
+                        background-color: {colors['bg']};
+                        color: {colors['text']};
+                        padding: 2px 8px;
+                        border-radius: 10px;
+                        font-size: {Theme.FONTS['size_xs']};
+                        font-weight: {Theme.FONTS['weight_semibold']};
+                    }}
+                """)
+                layout.addWidget(badge)
 
         layout.addStretch()
-
-    def _create_badge(self, text: str, colors: Dict) -> QtWidgets.QLabel:
-        """Create a colored badge label."""
-        badge = QtWidgets.QLabel(text)
-        badge.setStyleSheet(f"""
-            QLabel {{
-                background-color: {colors['bg']};
-                color: {colors['text']};
-                padding: 2px 8px;
-                border-radius: 10px;
-                font-size: 11px;
-                font-weight: 600;
-            }}
-        """)
-        return badge

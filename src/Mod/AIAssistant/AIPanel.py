@@ -11,13 +11,14 @@ import FreeCAD
 import FreeCADGui
 from PySide6 import QtWidgets, QtCore, QtGui
 
-FreeCAD.Console.PrintMessage("AIAssistant: AIPanel.py loaded (v2 with session title)\n")
+FreeCAD.Console.PrintMessage("AIAssistant: AIPanel.py loaded (v3 modern design)\n")
 
 from . import LLMBackend
 from . import ContextBuilder
 from . import CodeExecutor
 from . import SnapshotManager
 from . import ChangeDetector
+from . import Theme
 from .ChatWidget import ChatWidget
 from .SessionManager import SessionManager
 from .PreviewManager import PreviewManager
@@ -78,78 +79,82 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
     def _setup_ui(self):
         """Build the UI."""
         main = QtWidgets.QWidget()
-        main.setStyleSheet("background-color: #1a1a1a;")
+        main.setStyleSheet(f"background-color: {Theme.COLORS['bg_primary']};")
         layout = QtWidgets.QVBoxLayout(main)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
         # Header
         header = QtWidgets.QWidget()
-        header.setStyleSheet("""
-            QWidget {
-                background-color: #252525;
-                border-bottom: 1px solid #333;
-            }
+        header.setStyleSheet(f"""
+            QWidget {{
+                background-color: {Theme.COLORS['bg_secondary']};
+                border-bottom: 1px solid {Theme.COLORS['border_subtle']};
+            }}
         """)
-        header.setFixedHeight(50)
+        header.setFixedHeight(48)
         header_layout = QtWidgets.QHBoxLayout(header)
-        header_layout.setContentsMargins(12, 0, 12, 0)
+        header_layout.setContentsMargins(14, 0, 10, 0)
+        header_layout.setSpacing(6)
 
         # Title area with main title and session subtitle
         title_area = QtWidgets.QWidget()
         title_area.setStyleSheet("background: transparent;")
         title_area_layout = QtWidgets.QVBoxLayout(title_area)
-        title_area_layout.setContentsMargins(0, 4, 0, 4)
+        title_area_layout.setContentsMargins(0, 6, 0, 6)
         title_area_layout.setSpacing(0)
 
         title = QtWidgets.QLabel("AI Assistant")
-        title.setStyleSheet("""
-            QLabel {
-                color: #e0e0e0;
-                font-weight: bold;
-                font-size: 14px;
+        title.setStyleSheet(f"""
+            QLabel {{
+                color: {Theme.COLORS['text_primary']};
+                font-weight: {Theme.FONTS['weight_semibold']};
+                font-size: {Theme.FONTS['size_base']};
                 background: transparent;
-            }
+            }}
         """)
         title_area_layout.addWidget(title)
 
         # Session title label
         self._session_label = QtWidgets.QLabel("")
-        self._session_label.setStyleSheet("""
-            QLabel {
-                color: #666;
-                font-size: 11px;
+        self._session_label.setStyleSheet(f"""
+            QLabel {{
+                color: {Theme.COLORS['text_muted']};
+                font-size: {Theme.FONTS['size_xs']};
                 background: transparent;
-            }
+            }}
         """)
-        self._session_label.hide()  # Hidden until a session is loaded
+        self._session_label.hide()
         title_area_layout.addWidget(self._session_label)
 
         header_layout.addWidget(title_area)
         header_layout.addStretch()
+
+        # Header button style
+        header_btn_style = f"""
+            QToolButton {{
+                color: {Theme.COLORS['text_secondary']};
+                background: transparent;
+                border: none;
+                font-size: {Theme.FONTS['size_sm']};
+                padding: 6px 10px;
+                border-radius: {Theme.RADIUS['xs']};
+            }}
+            QToolButton:hover {{
+                color: {Theme.COLORS['text_primary']};
+                background-color: {Theme.COLORS['bg_hover']};
+            }}
+            QToolButton::menu-indicator {{
+                image: none;
+            }}
+        """
 
         # Sessions button
         self.sessions_btn = QtWidgets.QToolButton()
         self.sessions_btn.setText("Sessions")
         self.sessions_btn.setToolTip("View and switch sessions")
         self.sessions_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        self.sessions_btn.setStyleSheet("""
-            QToolButton {
-                color: #888;
-                background: transparent;
-                border: none;
-                font-size: 12px;
-                padding: 4px 8px;
-            }
-            QToolButton:hover {
-                color: #e0e0e0;
-                background-color: #333;
-                border-radius: 4px;
-            }
-            QToolButton::menu-indicator {
-                image: none;
-            }
-        """)
+        self.sessions_btn.setStyleSheet(header_btn_style)
         header_layout.addWidget(self.sessions_btn)
 
         # Settings button
@@ -157,23 +162,10 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self.settings_btn.setText("...")
         self.settings_btn.setToolTip("Settings")
         self.settings_btn.setPopupMode(QtWidgets.QToolButton.InstantPopup)
-        self.settings_btn.setStyleSheet("""
-            QToolButton {
-                color: #888;
-                background: transparent;
-                border: none;
-                font-size: 16px;
-                padding: 4px 8px;
-            }
-            QToolButton:hover {
-                color: #e0e0e0;
-                background-color: #333;
-                border-radius: 4px;
-            }
-            QToolButton::menu-indicator {
-                image: none;
-            }
-        """)
+        self.settings_btn.setStyleSheet(header_btn_style.replace(
+            f"font-size: {Theme.FONTS['size_sm']};",
+            f"font-size: {Theme.FONTS['size_lg']};"
+        ))
         self._setup_settings_menu()
         header_layout.addWidget(self.settings_btn)
 
@@ -181,20 +173,7 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         clear_btn = QtWidgets.QToolButton()
         clear_btn.setText("Clear")
         clear_btn.setToolTip("Clear chat")
-        clear_btn.setStyleSheet("""
-            QToolButton {
-                color: #888;
-                background: transparent;
-                border: none;
-                font-size: 12px;
-                padding: 4px 8px;
-            }
-            QToolButton:hover {
-                color: #e0e0e0;
-                background-color: #333;
-                border-radius: 4px;
-            }
-        """)
+        clear_btn.setStyleSheet(header_btn_style)
         clear_btn.clicked.connect(self._on_clear)
         header_layout.addWidget(clear_btn)
 
@@ -211,26 +190,26 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
     def _setup_settings_menu(self):
         """Setup the settings dropdown menu."""
         menu = QtWidgets.QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #2d2d2d;
-                color: #e0e0e0;
-                border: 1px solid #444;
-                border-radius: 4px;
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {Theme.COLORS['bg_secondary']};
+                color: {Theme.COLORS['text_primary']};
+                border: 1px solid {Theme.COLORS['border_default']};
+                border-radius: {Theme.RADIUS['sm']};
                 padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 20px;
-                border-radius: 4px;
-            }
-            QMenu::item:selected {
-                background-color: #3d3d3d;
-            }
-            QMenu::separator {
+            }}
+            QMenu::item {{
+                padding: 8px 16px;
+                border-radius: {Theme.RADIUS['xs']};
+            }}
+            QMenu::item:selected {{
+                background-color: {Theme.COLORS['bg_hover']};
+            }}
+            QMenu::separator {{
                 height: 1px;
-                background-color: #444;
+                background-color: {Theme.COLORS['border_subtle']};
                 margin: 4px 8px;
-            }
+            }}
         """)
 
         self.context_action = menu.addAction("Include document context")
@@ -278,26 +257,26 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         """Refresh the sessions dropdown menu."""
         menu = self._sessions_menu
         menu.clear()
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #2d2d2d;
-                color: #e0e0e0;
-                border: 1px solid #444;
-                border-radius: 4px;
+        menu.setStyleSheet(f"""
+            QMenu {{
+                background-color: {Theme.COLORS['bg_secondary']};
+                color: {Theme.COLORS['text_primary']};
+                border: 1px solid {Theme.COLORS['border_default']};
+                border-radius: {Theme.RADIUS['sm']};
                 padding: 4px;
-            }
-            QMenu::item {
-                padding: 6px 20px;
-                border-radius: 4px;
-            }
-            QMenu::item:selected {
-                background-color: #3d3d3d;
-            }
-            QMenu::separator {
+            }}
+            QMenu::item {{
+                padding: 8px 16px;
+                border-radius: {Theme.RADIUS['xs']};
+            }}
+            QMenu::item:selected {{
+                background-color: {Theme.COLORS['bg_hover']};
+            }}
+            QMenu::separator {{
                 height: 1px;
-                background-color: #444;
+                background-color: {Theme.COLORS['border_subtle']};
                 margin: 4px 8px;
-            }
+            }}
         """)
 
         new_session = menu.addAction("+ New Session")

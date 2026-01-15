@@ -1,25 +1,27 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """
-Chat Widget - Main chat interface combining message list and input.
+Chat Widget - Modern chat interface with clean design.
+Cursor-inspired styling with blue accents.
 """
 
 import FreeCAD
-FreeCAD.Console.PrintMessage("AIAssistant: ChatWidget.py loaded (v2 with system filter)\n")
+FreeCAD.Console.PrintMessage("AIAssistant: ChatWidget.py loaded (v3 modern design)\n")
 
 from typing import Union, List, Dict
 from PySide6 import QtWidgets, QtCore, QtGui
 from .MessageModel import ChatMessageModel, ChatMessage, MessageRole
-from .MessageDelegate import MessageBubbleWidget, TypingIndicatorWidget
+from .MessageDelegate import MessageCard, ThinkingIndicator
 from .ChangeDetector import ChangeSet
 from .ChangeWidget import ChangeWidget
 from .PreviewWidget import PreviewWidget
+from . import Theme
 
 
 class ChatListWidget(QtWidgets.QScrollArea):
     """Scrollable list of chat messages using widgets."""
 
     runCodeRequested = QtCore.Signal(str)
-    previewApproved = QtCore.Signal(str)  # code to execute
+    previewApproved = QtCore.Signal(str)
     previewCancelled = QtCore.Signal()
 
     def __init__(self, parent=None):
@@ -35,71 +37,42 @@ class ChatListWidget(QtWidgets.QScrollArea):
         self.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAsNeeded)
 
-        self.setStyleSheet("""
-            QScrollArea {
-                background-color: #0d1117;
+        self.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {Theme.COLORS['bg_primary']};
                 border: none;
-            }
-            QScrollBar:vertical {
-                background-color: #0d1117;
-                width: 10px;
-                border-radius: 5px;
-                margin: 4px 2px;
-            }
-            QScrollBar::handle:vertical {
-                background-color: #30363d;
-                border-radius: 5px;
-                min-height: 40px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background-color: #484f58;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
-                background: none;
-            }
+            }}
+            {Theme.get_scrollbar_style()}
         """)
 
         # Container widget
         self._container = QtWidgets.QWidget()
-        self._container.setStyleSheet("background-color: #0d1117;")
+        self._container.setStyleSheet(f"background-color: {Theme.COLORS['bg_primary']};")
         self._layout = QtWidgets.QVBoxLayout(self._container)
-        self._layout.setContentsMargins(8, 8, 8, 8)
-        self._layout.setSpacing(8)
+        self._layout.setContentsMargins(12, 16, 12, 16)
+        self._layout.setSpacing(12)
         self._layout.addStretch()
 
         self.setWidget(self._container)
 
     def add_message(self, text: str, role: str, debug_info: dict = None) -> int:
         """Add a new message to the chat."""
-        import FreeCAD
-        FreeCAD.Console.PrintMessage(f"AIAssistant: ChatListWidget.add_message role={role}, debug_info={debug_info is not None}\n")
-
-        # Add to model
         row = self._model.add_message(text, role)
-
-        # Create widget
         message = self._model.get_message(row)
-        widget = MessageBubbleWidget(message, debug_info=debug_info)
+        widget = MessageCard(message, debug_info=debug_info)
         widget.runCodeRequested.connect(self.runCodeRequested.emit)
 
-        # Insert before the stretch
         self._layout.insertWidget(self._layout.count() - 1, widget)
         self._message_widgets.append(widget)
 
-        # Scroll to bottom
         QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
-
         return row
 
     def add_streaming_message(self, role: str) -> int:
         """Add a message that will be streamed."""
         row = self._model.add_message("", role, is_streaming=True)
-
         message = self._model.get_message(row)
-        widget = MessageBubbleWidget(message)
+        widget = MessageCard(message)
         widget.runCodeRequested.connect(self.runCodeRequested.emit)
 
         self._layout.insertWidget(self._layout.count() - 1, widget)
@@ -120,7 +93,7 @@ class ChatListWidget(QtWidgets.QScrollArea):
     def show_typing_indicator(self):
         """Show the typing indicator."""
         if self._typing_indicator is None:
-            self._typing_indicator = TypingIndicatorWidget()
+            self._typing_indicator = ThinkingIndicator()
             self._layout.insertWidget(self._layout.count() - 1, self._typing_indicator)
 
         self._typing_indicator.show()
@@ -138,7 +111,6 @@ class ChatListWidget(QtWidgets.QScrollArea):
 
     def clear(self):
         """Clear all messages."""
-        # Remove widgets
         for widget in self._message_widgets:
             self._layout.removeWidget(widget)
             widget.deleteLater()
@@ -155,61 +127,38 @@ class ChatListWidget(QtWidgets.QScrollArea):
 
     def add_change_message(self, change_set: Union[ChangeSet, dict]):
         """Add a change visualization message."""
-        import FreeCAD
-        FreeCAD.Console.PrintMessage(f"AIAssistant: ChatListWidget.add_change_message\n")
-
-        # Convert to dict if needed for storage
         changes_dict = change_set.to_dict() if isinstance(change_set, ChangeSet) else change_set
 
-        # Add to model with changes data
         row = self._model.add_message(
             text="Changes applied",
             role=MessageRole.SYSTEM,
             changes=changes_dict
         )
 
-        # Create ChangeWidget directly instead of MessageBubbleWidget
         widget = ChangeWidget(change_set)
         widget.runCodeRequested.connect(self.runCodeRequested.emit)
 
-        # Insert before the stretch
         self._layout.insertWidget(self._layout.count() - 1, widget)
         self._message_widgets.append(widget)
 
-        # Scroll to bottom
         QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
-
         return row
 
     def add_preview_message(self, description: str, preview_items: List[Dict], code: str):
-        """Add a preview message with approve/cancel buttons.
-
-        Args:
-            description: Human-readable description of what will be created
-            preview_items: List of dicts with name, label, type, dimensions
-            code: The Python code to execute on approval
-        """
-        import FreeCAD
-        FreeCAD.Console.PrintMessage(f"AIAssistant: ChatListWidget.add_preview_message - {len(preview_items)} items\n")
-
-        # Add to model
+        """Add a preview message with approve/cancel buttons."""
         row = self._model.add_message(
             text=description,
             role=MessageRole.SYSTEM
         )
 
-        # Create PreviewWidget
         widget = PreviewWidget(description, preview_items, code)
         widget.approved.connect(lambda: self._on_preview_approved(code, widget))
         widget.cancelled.connect(lambda: self._on_preview_cancelled(widget))
 
-        # Insert before the stretch
         self._layout.insertWidget(self._layout.count() - 1, widget)
         self._message_widgets.append(widget)
 
-        # Scroll to bottom
         QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
-
         return row
 
     def _on_preview_approved(self, code: str, widget: PreviewWidget):
@@ -223,15 +172,31 @@ class ChatListWidget(QtWidgets.QScrollArea):
         self.previewCancelled.emit()
 
     def _scroll_to_bottom(self):
-        """Scroll to the bottom of the chat."""
+        """Scroll to the bottom of the chat with smooth animation."""
         scrollbar = self.verticalScrollBar()
-        scrollbar.setValue(scrollbar.maximum())
+        # Use smooth scrolling
+        self._smooth_scroll_to(scrollbar.maximum())
+
+    def _smooth_scroll_to(self, target: int):
+        """Animate scroll to target position."""
+        scrollbar = self.verticalScrollBar()
+        current = scrollbar.value()
+
+        if not hasattr(self, '_scroll_anim'):
+            self._scroll_anim = QtCore.QPropertyAnimation(scrollbar, b"value")
+            self._scroll_anim.setDuration(150)
+            self._scroll_anim.setEasingCurve(QtCore.QEasingCurve.OutCubic)
+
+        self._scroll_anim.stop()
+        self._scroll_anim.setStartValue(current)
+        self._scroll_anim.setEndValue(target)
+        self._scroll_anim.start()
 
 
 class StreamingController(QtCore.QObject):
-    """Controls the typewriter streaming effect."""
+    """Controls the typewriter streaming effect with word-based chunks."""
 
-    characterRevealed = QtCore.Signal(str)  # Current displayed text
+    characterRevealed = QtCore.Signal(str)
     streamingComplete = QtCore.Signal()
 
     def __init__(self, parent=None):
@@ -242,9 +207,9 @@ class StreamingController(QtCore.QObject):
         self._timer = QtCore.QTimer(self)
         self._timer.timeout.connect(self._reveal_next)
 
-        # Streaming speed (characters per tick)
-        self._chars_per_tick = 3
-        self._tick_interval = 20  # ms
+        # Streaming speed
+        self._chars_per_tick = 4
+        self._tick_interval = 15
 
     def start_streaming(self, text: str):
         """Start streaming the text."""
@@ -255,14 +220,14 @@ class StreamingController(QtCore.QObject):
         # Adjust speed based on text length
         length = len(text)
         if length > 2000:
-            self._chars_per_tick = 10
-            self._tick_interval = 10
+            self._chars_per_tick = 15
+            self._tick_interval = 8
         elif length > 500:
-            self._chars_per_tick = 5
-            self._tick_interval = 15
+            self._chars_per_tick = 8
+            self._tick_interval = 12
         else:
-            self._chars_per_tick = 2
-            self._tick_interval = 20
+            self._chars_per_tick = 4
+            self._tick_interval = 15
 
         self._timer.start(self._tick_interval)
 
@@ -278,27 +243,35 @@ class StreamingController(QtCore.QObject):
         self.stop()
 
     def _reveal_next(self):
-        """Reveal next characters."""
+        """Reveal next characters - prefer word boundaries."""
         if self._index >= len(self._full_text):
             self._timer.stop()
             self.streamingComplete.emit()
             return
 
-        # Reveal next chunk
-        end = min(self._index + self._chars_per_tick, len(self._full_text))
-        self._displayed_text = self._full_text[:end]
-        self._index = end
+        # Calculate end position
+        target_end = min(self._index + self._chars_per_tick, len(self._full_text))
+
+        # Try to end at a word boundary (space, newline)
+        if target_end < len(self._full_text):
+            for i in range(target_end, min(target_end + 10, len(self._full_text))):
+                if self._full_text[i] in ' \n\t':
+                    target_end = i + 1
+                    break
+
+        self._displayed_text = self._full_text[:target_end]
+        self._index = target_end
 
         self.characterRevealed.emit(self._displayed_text)
 
 
 class ChatWidget(QtWidgets.QWidget):
-    """Main chat widget combining list, input, and controls."""
+    """Main chat widget with modern styling."""
 
-    messageSubmitted = QtCore.Signal(str)  # User sends a message
-    runCodeRequested = QtCore.Signal(str)  # User wants to run code
-    previewApproved = QtCore.Signal(str)   # User approved preview - code to execute
-    previewCancelled = QtCore.Signal()     # User cancelled preview
+    messageSubmitted = QtCore.Signal(str)
+    runCodeRequested = QtCore.Signal(str)
+    previewApproved = QtCore.Signal(str)
+    previewCancelled = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -323,72 +296,74 @@ class ChatWidget(QtWidgets.QWidget):
 
         # Input area container
         input_container = QtWidgets.QWidget()
-        input_container.setStyleSheet("""
-            QWidget {
-                background-color: #161b22;
-                border-top: 1px solid #30363d;
-            }
+        input_container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {Theme.COLORS['bg_secondary']};
+                border-top: 1px solid {Theme.COLORS['border_subtle']};
+            }}
         """)
         input_layout = QtWidgets.QVBoxLayout(input_container)
-        input_layout.setContentsMargins(16, 12, 16, 16)
+        input_layout.setContentsMargins(16, 14, 16, 16)
         input_layout.setSpacing(10)
 
         # Input frame with border
         input_frame = QtWidgets.QFrame()
-        input_frame.setStyleSheet("""
-            QFrame {
-                background-color: #0d1117;
-                border: 1px solid #30363d;
-                border-radius: 12px;
-            }
-            QFrame:focus-within {
-                border-color: #58a6ff;
-            }
+        input_frame.setObjectName("input_frame")
+        input_frame.setStyleSheet(f"""
+            QFrame#input_frame {{
+                background-color: {Theme.COLORS['bg_input']};
+                border: 1px solid {Theme.COLORS['border_default']};
+                border-radius: {Theme.RADIUS['lg']};
+            }}
+            QFrame#input_frame:focus-within {{
+                border-color: {Theme.COLORS['border_focus']};
+            }}
         """)
         input_frame_layout = QtWidgets.QHBoxLayout(input_frame)
-        input_frame_layout.setContentsMargins(12, 8, 8, 8)
-        input_frame_layout.setSpacing(8)
+        input_frame_layout.setContentsMargins(14, 10, 10, 10)
+        input_frame_layout.setSpacing(10)
 
         # Text input
         self._input = QtWidgets.QTextEdit()
-        self._input.setPlaceholderText("Describe what you want to build...")
+        self._input.setPlaceholderText("What would you like to build?")
         self._input.setMinimumHeight(44)
         self._input.setMaximumHeight(120)
-        self._input.setStyleSheet("""
-            QTextEdit {
+        self._input.setStyleSheet(f"""
+            QTextEdit {{
                 background-color: transparent;
-                color: #c9d1d9;
+                color: {Theme.COLORS['text_primary']};
                 border: none;
-                font-size: 14px;
+                font-size: {Theme.FONTS['size_base']};
                 padding: 4px 0;
-            }
+                selection-background-color: {Theme.COLORS['accent_primary']};
+            }}
         """)
         self._input.installEventFilter(self)
         input_frame_layout.addWidget(self._input, stretch=1)
 
         # Send button
         self._send_btn = QtWidgets.QPushButton("Send")
-        self._send_btn.setFixedSize(72, 36)
+        self._send_btn.setFixedSize(72, 38)
         self._send_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        self._send_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #238636;
+        self._send_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.COLORS['accent_primary']};
                 color: #ffffff;
                 border: none;
-                border-radius: 8px;
-                font-weight: 600;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #2ea043;
-            }
-            QPushButton:pressed {
-                background-color: #238636;
-            }
-            QPushButton:disabled {
-                background-color: #21262d;
-                color: #484f58;
-            }
+                border-radius: {Theme.RADIUS['md']};
+                font-weight: {Theme.FONTS['weight_medium']};
+                font-size: {Theme.FONTS['size_base']};
+            }}
+            QPushButton:hover {{
+                background-color: {Theme.COLORS['accent_primary_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {Theme.COLORS['accent_primary']};
+            }}
+            QPushButton:disabled {{
+                background-color: {Theme.COLORS['bg_tertiary']};
+                color: {Theme.COLORS['text_muted']};
+            }}
         """)
         self._send_btn.clicked.connect(self._on_send)
         input_frame_layout.addWidget(self._send_btn, alignment=QtCore.Qt.AlignBottom)
@@ -397,7 +372,11 @@ class ChatWidget(QtWidgets.QWidget):
 
         # Hint text
         hint = QtWidgets.QLabel("Enter to send  ·  Shift+Enter for new line")
-        hint.setStyleSheet("color: #484f58; font-size: 11px; background: transparent;")
+        hint.setStyleSheet(f"""
+            color: {Theme.COLORS['text_muted']};
+            font-size: {Theme.FONTS['size_xs']};
+            background: transparent;
+        """)
         hint.setAlignment(QtCore.Qt.AlignCenter)
         input_layout.addWidget(hint)
 
@@ -413,10 +392,8 @@ class ChatWidget(QtWidgets.QWidget):
         if obj == self._input and event.type() == QtCore.QEvent.KeyPress:
             if event.key() == QtCore.Qt.Key_Return:
                 if event.modifiers() & QtCore.Qt.ShiftModifier:
-                    # Shift+Enter: new line
                     return False
                 else:
-                    # Enter: send message
                     self._on_send()
                     return True
         return super().eventFilter(obj, event)
@@ -437,15 +414,11 @@ class ChatWidget(QtWidgets.QWidget):
 
     def add_assistant_message(self, text: str, stream: bool = True, debug_info: dict = None):
         """Add an assistant message, optionally with streaming."""
-        import FreeCAD
-        FreeCAD.Console.PrintMessage(f"AIAssistant: add_assistant_message stream={stream}, debug_info={debug_info is not None}\n")
         if stream:
-            # For streaming, store debug_info to add after streaming completes
             self._pending_debug_info = debug_info
             self._streaming_row = self._chat_list.add_streaming_message(MessageRole.ASSISTANT)
             self._streaming_controller.start_streaming(text)
         else:
-            FreeCAD.Console.PrintMessage(f"AIAssistant: Calling add_message with debug_info={debug_info is not None}\n")
             self._chat_list.add_message(text, MessageRole.ASSISTANT, debug_info=debug_info)
 
     def add_system_message(self, text: str):
@@ -466,27 +439,18 @@ class ChatWidget(QtWidgets.QWidget):
 
     def add_message_from_dict(self, msg_dict: dict, show_debug: bool = False):
         """Load a message from session JSON."""
-        import FreeCAD
         role = msg_dict.get("role", "system")
         text = msg_dict.get("text", "")
         changes = msg_dict.get("changes")
 
-        FreeCAD.Console.PrintMessage(f"AIAssistant: add_message_from_dict ENTER - role={role!r}, text={text[:30]!r}, has_changes={changes is not None}\n")
-
-        # Handle change messages (stored as system role with changes data)
         if changes:
-            FreeCAD.Console.PrintMessage(f"AIAssistant: Loading change message\n")
             self.add_change_message(changes)
             return
 
-        # Skip system messages - they're UI feedback and shouldn't be reloaded
-        # Check both the constant and the literal string for robustness
         if role == MessageRole.SYSTEM or role == "system":
-            FreeCAD.Console.PrintMessage(f"AIAssistant: SKIPPING system message: {text[:30]!r}\n")
             return
 
         debug_info = msg_dict.get("debug_info") if show_debug else None
-        FreeCAD.Console.PrintMessage(f"AIAssistant: add_message_from_dict LOADING - role={role}, show_debug={show_debug}, has_debug_info={debug_info is not None}\n")
 
         if role == MessageRole.USER:
             self.add_user_message(text)
@@ -523,9 +487,6 @@ class ChatWidget(QtWidgets.QWidget):
 
     def _on_streaming_complete(self):
         """Handle streaming completion."""
-        import FreeCAD
-        FreeCAD.Console.PrintMessage(f"AIAssistant: Streaming complete, row={self._streaming_row}, pending_debug={self._pending_debug_info is not None}\n")
-
         if self._streaming_row >= 0:
             message = self._chat_list._model.get_message(self._streaming_row)
             if message:
@@ -535,17 +496,11 @@ class ChatWidget(QtWidgets.QWidget):
                     is_complete=True
                 )
 
-            # Add debug info widget if pending
             widget_count = len(self._chat_list._message_widgets)
-            FreeCAD.Console.PrintMessage(f"AIAssistant: Checking debug - row={self._streaming_row}, widgets={widget_count}, has_debug={self._pending_debug_info is not None}\n")
-
             if self._pending_debug_info and self._streaming_row < widget_count:
                 widget = self._chat_list._message_widgets[self._streaming_row]
-                FreeCAD.Console.PrintMessage("AIAssistant: Adding debug info widget\n")
                 widget.add_debug_info(self._pending_debug_info)
                 self._pending_debug_info = None
-            elif self._pending_debug_info:
-                FreeCAD.Console.PrintWarning(f"AIAssistant: Could not add debug info - row {self._streaming_row} >= widget count {widget_count}\n")
 
         self._streaming_row = -1
 
