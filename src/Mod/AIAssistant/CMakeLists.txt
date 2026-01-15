@@ -21,6 +21,8 @@ SET(AIAssistant_SRCS
     ChangeWidget.py
     PreviewManager.py
     PreviewWidget.py
+    PartsLibrary.py
+    SourceManager.py
 )
 
 SOURCE_GROUP("" FILES ${AIAssistant_SRCS})
