@@ -23,6 +23,10 @@ from .SessionManager import SessionManager
 from .PreviewManager import PreviewManager
 
 
+# Maximum attempts to auto-fix code that fails preview
+MAX_FIX_ATTEMPTS = 3
+
+
 class LLMWorker(QtCore.QThread):
     """Background worker for LLM API calls."""
     finished = QtCore.Signal(str)
@@ -55,6 +59,7 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
 
         self.llm = LLMBackend.LLMBackend()
         self.worker = None
+        self._fix_worker = None  # Worker for auto-fix requests
         self.pending_input = None
         self._last_code = ""
 
@@ -495,14 +500,37 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
             self.pending_input = None
             return
 
-        # Create preview in temp document
-        FreeCAD.Console.PrintMessage(f"AIAssistant: Creating preview...\n")
-        preview_success = self._preview_manager.create_preview(code)
+        # Try to create preview with auto-fix if needed
+        self._attempt_preview_with_autofix(description, code, response)
 
-        if preview_success:
+        self.pending_input = None
+
+    def _attempt_preview_with_autofix(self, description: str, code: str, original_response: str, attempt: int = 1):
+        """Try to create preview, auto-fix errors if needed.
+
+        Args:
+            description: Text description from LLM response
+            code: Python code to execute
+            original_response: Original full LLM response (for fallback display)
+            attempt: Current attempt number (1-based)
+        """
+        # Keep typing indicator visible during retries
+        if attempt > 1:
+            self._chat.show_typing()
+            FreeCAD.Console.PrintMessage(f"AIAssistant: Auto-fix attempt {attempt}...\n")
+
+        # Try to create preview
+        FreeCAD.Console.PrintMessage(f"AIAssistant: Creating preview (attempt {attempt})...\n")
+        success, error_msg = self._preview_manager.create_preview(code)
+
+        if success:
             # Get preview summary
             preview_items = self._preview_manager.get_preview_summary()
             FreeCAD.Console.PrintMessage(f"AIAssistant: Preview created with {len(preview_items)} objects\n")
+
+            # Hide typing if shown during retry
+            if attempt > 1:
+                self._chat.hide_typing()
 
             # Show preview widget
             self._chat.add_preview_message(
@@ -510,13 +538,82 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
                 preview_items=preview_items,
                 code=code
             )
-        else:
-            # Preview failed - fall back to traditional code block
-            FreeCAD.Console.PrintWarning("AIAssistant: Preview failed, showing code block\n")
-            self._preview_manager.clear_preview()
-            self._show_traditional_response(response)
+            return
 
-        self.pending_input = None
+        # Preview failed
+        if attempt >= MAX_FIX_ATTEMPTS:
+            # Give up - show traditional code block
+            FreeCAD.Console.PrintWarning(f"AIAssistant: Max auto-fix attempts reached, showing code block\n")
+            self._chat.hide_typing()
+            self._preview_manager.clear_preview()
+            self._show_traditional_response(original_response)
+            return
+
+        # Ask LLM to fix the code
+        FreeCAD.Console.PrintMessage(f"AIAssistant: Preview failed, requesting fix from LLM...\n")
+        self._request_code_fix(description, code, error_msg, original_response, attempt)
+
+    def _request_code_fix(self, description: str, code: str, error: str, original_response: str, attempt: int):
+        """Send error to LLM and request fixed code.
+
+        Args:
+            description: Original description from response
+            code: Code that failed
+            error: Error message from execution
+            original_response: Original full response (for fallback)
+            attempt: Current attempt number
+        """
+        fix_prompt = f"""The following FreeCAD Python code failed with an error:
+
+```python
+{code}
+```
+
+Error:
+{error}
+
+Please fix the code. The code runs in a SANDBOX where existing document objects are NOT available.
+If you need to reference existing objects, recreate them or use hardcoded values.
+
+Return ONLY the fixed Python code in a ```python code block, no explanation needed."""
+
+        # Start background worker for fix request
+        self._fix_worker = LLMWorker(self.llm, fix_prompt, "", [])
+        self._fix_worker.finished.connect(
+            lambda fixed_response: self._on_fix_response(description, fixed_response, original_response, attempt)
+        )
+        self._fix_worker.error.connect(self._on_fix_error)
+        self._fix_worker.start()
+
+    def _on_fix_response(self, description: str, response: str, original_response: str, attempt: int):
+        """Handle fixed code from LLM.
+
+        Args:
+            description: Original description
+            response: LLM response with fixed code
+            original_response: Original full response (for fallback)
+            attempt: Previous attempt number
+        """
+        _, fixed_code = self._parse_response(response)
+
+        if fixed_code.strip():
+            # Retry preview with fixed code
+            self._attempt_preview_with_autofix(description, fixed_code, original_response, attempt + 1)
+        else:
+            # Couldn't parse fixed code - fall back
+            FreeCAD.Console.PrintWarning("AIAssistant: Couldn't parse fixed code, showing original\n")
+            self._chat.hide_typing()
+            self._preview_manager.clear_preview()
+            self._show_traditional_response(original_response)
+
+    def _on_fix_error(self, error_msg: str):
+        """Handle error from fix request."""
+        FreeCAD.Console.PrintError(f"AIAssistant: Auto-fix request failed: {error_msg}\n")
+        self._chat.hide_typing()
+        self._preview_manager.clear_preview()
+        # Fall back to showing original response
+        if self._last_code:
+            self._show_traditional_response(self._last_code)
 
     def _parse_response(self, response: str) -> tuple:
         """Parse LLM response to extract description and code.
@@ -601,8 +698,8 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         # Clear the preview objects
         self._preview_manager.clear_preview()
 
-        # Now execute the code for real and show changes
-        self._on_run_code(code)
+        # Execute the code and show changes (mark as already executed so no Run button)
+        self._on_run_code(code, already_executed=True)
 
     def _on_preview_cancelled(self):
         """Handle user cancellation of preview."""
@@ -614,8 +711,13 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         # Add a system message
         self._chat.add_system_message("Preview cancelled")
 
-    def _on_run_code(self, code: str):
-        """Execute the provided code and display changes."""
+    def _on_run_code(self, code: str, already_executed: bool = False):
+        """Execute the provided code and display changes.
+
+        Args:
+            code: Python code to execute
+            already_executed: If True, don't show Run button (code came from preview approval)
+        """
         if not code.strip():
             return
 
@@ -629,7 +731,11 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         after_snapshot = SnapshotManager.capture_current_state()
 
         # Detect changes
-        change_set = ChangeDetector.detect_changes(before_snapshot, after_snapshot, code)
+        # Don't include code if already executed (from preview approval) - prevents showing Run button
+        change_set = ChangeDetector.detect_changes(
+            before_snapshot, after_snapshot,
+            code="" if already_executed else code
+        )
         change_set.execution_success = success
         change_set.execution_message = message
 
