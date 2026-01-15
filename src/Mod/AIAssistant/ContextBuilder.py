@@ -8,6 +8,8 @@ import FreeCAD
 import FreeCADGui
 from collections import deque
 from . import SnapshotManager
+from . import SourceManager
+from . import PartsLibrary
 
 
 # Global buffer for console messages (errors and warnings)
@@ -372,6 +374,16 @@ def build_context() -> str:
     comprehensive_context = _get_comprehensive_object_context()
     if comprehensive_context:
         lines.append(comprehensive_context)
+
+    # Source code history (how objects were created)
+    source_context = SourceManager.get_context()
+    if source_context:
+        lines.append(source_context)
+
+    # Parts library (available standard parts)
+    parts_context = PartsLibrary.get_context()
+    if parts_context:
+        lines.append(parts_context)
 
     return "\n".join(lines)
 

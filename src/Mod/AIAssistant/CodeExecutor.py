@@ -147,6 +147,13 @@ def _build_namespace() -> dict:
     except ImportError:
         pass
 
+    # Add PartsLibrary for inserting standard parts
+    try:
+        from . import PartsLibrary
+        namespace["PartsLibrary"] = PartsLibrary
+    except ImportError:
+        pass
+
     return namespace
 
 
