@@ -18,6 +18,7 @@ from . import ContextBuilder
 from . import CodeExecutor
 from . import SnapshotManager
 from . import ChangeDetector
+from . import SourceManager
 from . import Theme
 from .ChatWidget import ChatWidget
 from .SessionManager import SessionManager
@@ -33,16 +34,19 @@ class LLMWorker(QtCore.QThread):
     finished = QtCore.Signal(str)
     error = QtCore.Signal(str)
 
-    def __init__(self, llm, user_input, context, conversation):
+    def __init__(self, llm, user_input, context, conversation, screenshot=None):
         super().__init__()
         self.llm = llm
         self.user_input = user_input
         self.context = context
         self.conversation = conversation
+        self.screenshot = screenshot
 
     def run(self):
         try:
-            response = self.llm.chat(self.user_input, self.context, self.conversation)
+            response = self.llm.chat(
+                self.user_input, self.context, self.conversation, self.screenshot
+            )
             self.finished.emit(response)
         except Exception as e:
             self.error.emit(str(e))
@@ -63,6 +67,7 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self._fix_worker = None  # Worker for auto-fix requests
         self.pending_input = None
         self._last_code = ""
+        self._last_screenshot = None  # Base64 PNG of last viewport capture
 
         # Session manager for persisting conversations
         self.session_manager = SessionManager()
@@ -75,6 +80,9 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
 
         self._setup_ui()
         self._connect_signals()
+
+        # Ensure source file exists for saved documents
+        self._ensure_source_file()
 
     def _setup_ui(self):
         """Build the UI."""
@@ -435,8 +443,10 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         # Get conversation history
         conversation = self._chat.get_conversation_history()
 
-        # Start background worker
-        self.worker = LLMWorker(self.llm, user_input, context, conversation)
+        # Start background worker (include screenshot if available)
+        self.worker = LLMWorker(
+            self.llm, user_input, context, conversation, self._last_screenshot
+        )
         self.worker.finished.connect(self._on_response)
         self.worker.error.connect(self._on_error)
         self.worker.start()
@@ -719,6 +729,12 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
         change_set.execution_message = message
 
         if success:
+            # Capture screenshot for LLM feedback
+            self._last_screenshot = self._capture_screenshot()
+
+            # Save code to source file (for regeneration and context)
+            SourceManager.append_code(code)
+
             if change_set.is_empty():
                 self._chat.add_system_message("Code executed successfully (no object changes)")
             else:
@@ -745,6 +761,56 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
         if current_id:
             # Reload current session with new debug mode setting
             self._on_load_session(current_id)
+
+    def _ensure_source_file(self):
+        """
+        Ensure source file exists for current document.
+
+        Creates an empty source file with headers if the document is saved
+        but doesn't have a source file yet. This enables proactive source
+        tracking even before any AI code is executed.
+        """
+        doc = FreeCAD.ActiveDocument
+        if doc and doc.FileName:
+            if not SourceManager.exists():
+                SourceManager.init_source_file()
+
+    def _capture_screenshot(self) -> str:
+        """Capture current viewport as base64 PNG.
+
+        Returns:
+            Base64 encoded PNG string, or None if capture failed
+        """
+        import tempfile
+        import base64
+        import os
+
+        try:
+            if not FreeCADGui.ActiveDocument:
+                return None
+
+            view = FreeCADGui.ActiveDocument.ActiveView
+            if not hasattr(view, "saveImage"):
+                return None  # Not a 3D view
+
+            # Set isometric view and fit all objects
+            view.viewIsometric()
+            view.fitAll()
+
+            # Save to temp file
+            tmp_path = tempfile.mktemp(suffix=".png")
+            try:
+                view.saveImage(tmp_path, 800, 600)
+
+                with open(tmp_path, "rb") as f:
+                    return base64.b64encode(f.read()).decode("utf-8")
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+
+        except Exception as e:
+            FreeCAD.Console.PrintWarning(f"AIAssistant: Screenshot capture failed: {e}\n")
+            return None
 
     def closeEvent(self, event):
         """Clean up when panel is closed."""
