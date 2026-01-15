@@ -27,14 +27,23 @@ class PreviewWidget(QtWidgets.QFrame):
     cancelled = QtCore.Signal()
     showCodeRequested = QtCore.Signal()
 
+    # Auto-approve delay in milliseconds
+    AUTO_APPROVE_DELAY = 500
+
     def __init__(self, description: str, preview_items: List[Dict], code: str = "",
-                 is_deletion: bool = False, parent=None):
+                 is_deletion: bool = False, auto_approve: bool = False, parent=None):
         super().__init__(parent)
         self._code = code
         self._code_visible = False
         self._is_deletion = is_deletion
+        self._auto_approve = auto_approve
+        self._auto_approve_cancelled = False
         self._setup_ui(description, preview_items)
         self._setup_entry_animation()
+
+        # Start auto-approve countdown if enabled
+        if self._auto_approve:
+            self._start_auto_approve_countdown()
 
     def _setup_ui(self, description: str, items: List[Dict]):
         """Set up the widget UI."""
@@ -168,9 +177,9 @@ class PreviewWidget(QtWidgets.QFrame):
         btn_layout.setSpacing(10)
 
         # Cancel button - ghost style
-        cancel_btn = QtWidgets.QPushButton("Cancel")
-        cancel_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        cancel_btn.setStyleSheet(f"""
+        self._cancel_btn = QtWidgets.QPushButton("Cancel")
+        self._cancel_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self._cancel_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: transparent;
                 color: {Theme.COLORS['text_secondary']};
@@ -185,8 +194,19 @@ class PreviewWidget(QtWidgets.QFrame):
                 color: {Theme.COLORS['text_primary']};
             }}
         """)
-        cancel_btn.clicked.connect(self._on_cancel)
-        btn_layout.addWidget(cancel_btn)
+        self._cancel_btn.clicked.connect(self._on_cancel)
+        btn_layout.addWidget(self._cancel_btn)
+
+        # Auto-approve indicator (hidden by default)
+        self._auto_approve_label = QtWidgets.QLabel("Auto-approving...")
+        self._auto_approve_label.setStyleSheet(f"""
+            color: {Theme.COLORS['accent_primary']};
+            font-size: {Theme.FONTS['size_sm']};
+            font-weight: {Theme.FONTS['weight_medium']};
+            background: transparent;
+        """)
+        self._auto_approve_label.setVisible(self._auto_approve)
+        btn_layout.addWidget(self._auto_approve_label)
 
         btn_layout.addStretch()
 
@@ -195,9 +215,9 @@ class PreviewWidget(QtWidgets.QFrame):
         btn_color = DELETION_ACCENT if self._is_deletion else Theme.COLORS['accent_primary']
         btn_hover = DELETION_ACCENT_HOVER if self._is_deletion else Theme.COLORS['accent_primary_hover']
 
-        approve_btn = QtWidgets.QPushButton(btn_text)
-        approve_btn.setCursor(QtCore.Qt.PointingHandCursor)
-        approve_btn.setStyleSheet(f"""
+        self._approve_btn = QtWidgets.QPushButton(btn_text)
+        self._approve_btn.setCursor(QtCore.Qt.PointingHandCursor)
+        self._approve_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {btn_color};
                 color: white;
@@ -211,8 +231,22 @@ class PreviewWidget(QtWidgets.QFrame):
                 background-color: {btn_hover};
             }}
         """)
-        approve_btn.clicked.connect(self._on_approve)
-        btn_layout.addWidget(approve_btn)
+        self._approve_btn.clicked.connect(self._on_approve)
+        # Disable approve button in auto-approve mode
+        if self._auto_approve:
+            self._approve_btn.setEnabled(False)
+            self._approve_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Theme.COLORS['bg_tertiary']};
+                    color: {Theme.COLORS['text_muted']};
+                    border: none;
+                    border-radius: {Theme.RADIUS['sm']};
+                    padding: 10px 24px;
+                    font-size: {Theme.FONTS['size_base']};
+                    font-weight: {Theme.FONTS['weight_medium']};
+                }}
+            """)
+        btn_layout.addWidget(self._approve_btn)
 
         layout.addLayout(btn_layout)
 
@@ -296,7 +330,18 @@ class PreviewWidget(QtWidgets.QFrame):
 
     def _on_cancel(self):
         """Handle cancel button click."""
+        # Stop auto-approve if in progress
+        self._auto_approve_cancelled = True
         self.cancelled.emit()
+
+    def _start_auto_approve_countdown(self):
+        """Start the auto-approve countdown timer."""
+        QtCore.QTimer.singleShot(self.AUTO_APPROVE_DELAY, self._auto_approve_execute)
+
+    def _auto_approve_execute(self):
+        """Execute auto-approve after countdown (if not cancelled)."""
+        if not self._auto_approve_cancelled:
+            self.approved.emit()
 
     def set_disabled(self, disabled: bool):
         """Disable/enable the widget after approval/cancellation."""
