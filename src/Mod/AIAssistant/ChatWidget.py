@@ -14,6 +14,7 @@ from .MessageDelegate import MessageCard, ThinkingIndicator
 from .ChangeDetector import ChangeSet
 from .ChangeWidget import ChangeWidget
 from .PreviewWidget import PreviewWidget
+from .PlanWidget import PlanWidget
 from . import Theme
 
 
@@ -23,6 +24,9 @@ class ChatListWidget(QtWidgets.QScrollArea):
     runCodeRequested = QtCore.Signal(str)
     previewApproved = QtCore.Signal(str)
     previewCancelled = QtCore.Signal()
+    planApproved = QtCore.Signal(str)  # Emits the approved plan text
+    planEdited = QtCore.Signal(str)    # Emits the edited plan text
+    planCancelled = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -145,14 +149,23 @@ class ChatListWidget(QtWidgets.QScrollArea):
         return row
 
     def add_preview_message(self, description: str, preview_items: List[Dict], code: str,
-                            is_deletion: bool = False):
-        """Add a preview message with approve/cancel buttons."""
+                            is_deletion: bool = False, auto_approve: bool = False):
+        """Add a preview message with approve/cancel buttons.
+
+        Args:
+            description: Description text for the preview
+            preview_items: List of objects to be created/deleted
+            code: Python code to execute
+            is_deletion: Whether this is a deletion preview
+            auto_approve: If True, auto-approve after 500ms delay
+        """
         row = self._model.add_message(
             text=description,
             role=MessageRole.SYSTEM
         )
 
-        widget = PreviewWidget(description, preview_items, code, is_deletion=is_deletion)
+        widget = PreviewWidget(description, preview_items, code,
+                               is_deletion=is_deletion, auto_approve=auto_approve)
         widget.approved.connect(lambda: self._on_preview_approved(code, widget))
         widget.cancelled.connect(lambda: self._on_preview_cancelled(widget))
 
@@ -171,6 +184,44 @@ class ChatListWidget(QtWidgets.QScrollArea):
         """Handle preview cancellation."""
         widget.set_disabled(True)
         self.previewCancelled.emit()
+
+    def add_plan_message(self, plan_text: str, user_request: str = ""):
+        """Add a plan message with approve/edit/cancel buttons.
+
+        Args:
+            plan_text: The plan text from LLM
+            user_request: Original user request (for context)
+        """
+        row = self._model.add_message(
+            text="Execution Plan",
+            role=MessageRole.SYSTEM
+        )
+
+        widget = PlanWidget(plan_text, user_request)
+        widget.planApproved.connect(lambda: self._on_plan_approved(plan_text, widget))
+        widget.planEdited.connect(lambda edited: self._on_plan_edited(edited, widget))
+        widget.planCancelled.connect(lambda: self._on_plan_cancelled(widget))
+
+        self._layout.insertWidget(self._layout.count() - 1, widget)
+        self._message_widgets.append(widget)
+
+        QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
+        return row
+
+    def _on_plan_approved(self, plan_text: str, widget: PlanWidget):
+        """Handle plan approval."""
+        widget.set_disabled(True)
+        self.planApproved.emit(plan_text)
+
+    def _on_plan_edited(self, edited_text: str, widget: PlanWidget):
+        """Handle plan edit and approval."""
+        widget.set_disabled(True)
+        self.planEdited.emit(edited_text)
+
+    def _on_plan_cancelled(self, widget: PlanWidget):
+        """Handle plan cancellation."""
+        widget.set_disabled(True)
+        self.planCancelled.emit()
 
     def _scroll_to_bottom(self):
         """Scroll to the bottom of the chat with smooth animation."""
@@ -273,6 +324,9 @@ class ChatWidget(QtWidgets.QWidget):
     runCodeRequested = QtCore.Signal(str)
     previewApproved = QtCore.Signal(str)
     previewCancelled = QtCore.Signal()
+    planApproved = QtCore.Signal(str)  # Emits the approved plan text
+    planEdited = QtCore.Signal(str)    # Emits the edited plan text
+    planCancelled = QtCore.Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -293,6 +347,9 @@ class ChatWidget(QtWidgets.QWidget):
         self._chat_list.runCodeRequested.connect(self.runCodeRequested.emit)
         self._chat_list.previewApproved.connect(self.previewApproved.emit)
         self._chat_list.previewCancelled.connect(self.previewCancelled.emit)
+        self._chat_list.planApproved.connect(self.planApproved.emit)
+        self._chat_list.planEdited.connect(self.planEdited.emit)
+        self._chat_list.planCancelled.connect(self.planCancelled.emit)
         layout.addWidget(self._chat_list, stretch=1)
 
         # Input area container
@@ -435,9 +492,13 @@ class ChatWidget(QtWidgets.QWidget):
         self._chat_list.add_change_message(change_set)
 
     def add_preview_message(self, description: str, preview_items: List[Dict], code: str,
-                            is_deletion: bool = False):
+                            is_deletion: bool = False, auto_approve: bool = False):
         """Add a preview message with approve/cancel buttons."""
-        self._chat_list.add_preview_message(description, preview_items, code, is_deletion)
+        self._chat_list.add_preview_message(description, preview_items, code, is_deletion, auto_approve)
+
+    def add_plan_message(self, plan_text: str, user_request: str = ""):
+        """Add a plan message with approve/edit/cancel buttons."""
+        self._chat_list.add_plan_message(plan_text, user_request)
 
     def add_message_from_dict(self, msg_dict: dict, show_debug: bool = False):
         """Load a message from session JSON."""
