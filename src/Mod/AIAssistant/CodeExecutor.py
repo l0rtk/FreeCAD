@@ -115,6 +115,8 @@ def _build_namespace() -> dict:
         "FreeCADGui": FreeCADGui,
         "App": FreeCAD,
         "Gui": FreeCADGui,
+        # Provide 'doc' for convenience - matches sandbox preview environment
+        "doc": FreeCAD.ActiveDocument,
     }
 
     # Import common modules
