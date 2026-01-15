@@ -71,26 +71,160 @@ Each workbench follows this structure:
 
 ### AIAssistant Module (`src/Mod/AIAssistant/`)
 
-Natural language interface for creating 3D objects. Key components:
+Natural language interface for creating 3D objects. Uses a Cursor-inspired dark theme UI.
 
-- **AIPanel.py**: Main dock widget, orchestrates LLM requests and UI
-- **PreviewManager.py**: Executes code in sandbox temp document, shows green transparent preview
-- **PreviewWidget.py**: UI for approve/cancel preview actions
-- **ChangeWidget.py**: Displays created/modified/deleted objects after execution
-- **CodeBlockWidget.py**: Syntax-highlighted code display with Run button
-- **LLMBackend.py**: API communication with language model
-- **ContextBuilder.py**: Builds document context for LLM requests
-- **SessionManager.py**: Persists conversation history
+#### Core Components
 
-**Preview Flow**:
-1. User sends message → LLM returns code
-2. Code executes in temp document (sandbox)
-3. Shapes copied to main doc as green transparent preview
-4. User clicks "Approve & Create" → real execution
-5. ChangeWidget shows what was created/modified/deleted
+| File | Purpose |
+|------|---------|
+| `AIPanel.py` | Main dock widget, orchestrates LLM requests, settings, and UI integration |
+| `ChatWidget.py` | Chat message list, handles message types (user, assistant, plan, preview, code) |
+| `PreviewManager.py` | Executes code in sandbox temp document, creates green transparent previews |
+| `PreviewWidget.py` | UI for approve/cancel preview with optional auto-approve countdown |
+| `ChangeWidget.py` | Displays created/modified/deleted objects after execution |
+| `CodeBlockWidget.py` | Syntax-highlighted code display with Run button |
+| `ClaudeCodeBackend.py` | Communicates with Claude via `claude` CLI subprocess |
+| `ContextBuilder.py` | Builds document context for LLM requests, supports object filtering |
+| `SessionManager.py` | Persists conversation history to JSON |
+| `Theme.py` | Centralized color palette and styling constants |
 
-**Auto-Fix Feature**:
-When preview fails (e.g., code references non-existent objects), the error is automatically sent back to LLM for correction. This loops up to 3 times before falling back to showing the code block. User never sees the errors - just slightly longer "thinking..." animation.
+#### Advanced Features
+
+| File | Purpose |
+|------|---------|
+| `PlanWidget.py` | Plan mode UI - shows numbered steps for approval before code generation |
+| `StepPreviewWidget.py` | Multi-step diff view - individual step previews with states |
+| `ContextSelectionWidget.py` | Context selection dropdown (All/Selected/Custom object modes) |
+
+#### Settings Menu (⋯ button)
+
+- **Debug mode** - Shows raw context sent to LLM
+- **Auto-accept previews** - Automatically approve after 500ms delay
+- **Plan mode (2-phase)** - Get plan approval before code generation
+- **Clear conversation** - Reset chat history
+
+#### User Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         STANDARD MODE                                │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  User Message ──→ Context Selection ──→ LLM Request ──→ Code        │
+│                   (All/Selected/Custom)                              │
+│                          │                                           │
+│                          ▼                                           │
+│              ┌─────────────────────────┐                            │
+│              │    Preview Sandbox      │                            │
+│              │  (temp doc execution)   │                            │
+│              └───────────┬─────────────┘                            │
+│                          │                                           │
+│              ┌───────────┴───────────┐                              │
+│              │     Preview Failed?   │                              │
+│              └───────────┬───────────┘                              │
+│                    yes/  │ \no                                       │
+│                   ┌──────┘  └──────┐                                │
+│                   ▼                ▼                                 │
+│           Auto-Fix Loop      PreviewWidget                          │
+│           (up to 3x)        (green shapes)                          │
+│                   │                │                                 │
+│                   │       ┌────────┴────────┐                       │
+│                   │       │  Auto-Accept?   │                       │
+│                   │       └────────┬────────┘                       │
+│                   │          yes/  │ \no                            │
+│                   │         ┌──────┘  └──────┐                      │
+│                   │         ▼                ▼                       │
+│                   │    500ms delay     Manual Approve               │
+│                   │         │                │                       │
+│                   │         └────────┬───────┘                      │
+│                   │                  ▼                               │
+│                   │         Execute in Main Doc                     │
+│                   │                  │                               │
+│                   │                  ▼                               │
+│                   │           ChangeWidget                          │
+│                   │      (shows what changed)                       │
+│                   │                                                  │
+│                   └──→ CodeBlockWidget (fallback after 3 failures) │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────┐
+│                         PLAN MODE (2-PHASE)                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│  User Message ──→ LLM Call #1 ──→ PlanWidget                        │
+│                   (plan only)     (numbered steps)                   │
+│                                        │                             │
+│                          ┌─────────────┴─────────────┐              │
+│                          │                           │               │
+│                          ▼                           ▼               │
+│                    [Approve]                   [Edit Plan]           │
+│                          │                           │               │
+│                          │              User modifies text           │
+│                          │                           │               │
+│                          └─────────────┬─────────────┘              │
+│                                        ▼                             │
+│                              LLM Call #2                             │
+│                           (code generation)                          │
+│                                        │                             │
+│                                        ▼                             │
+│                              Standard Preview Flow                   │
+│                                   (see above)                        │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### Context Selection
+
+The context selector (above input area) controls what objects are included in LLM context:
+
+- **All objects** - Entire document (default)
+- **Selected only** - Only objects selected in FreeCAD's 3D view
+- **Custom...** - Manual checkbox selection with expandable list
+
+This affects the `objects_filter` parameter passed to `ContextBuilder.build_context()`.
+
+#### Preview System
+
+1. **Sandbox Execution**: Code runs in a temporary document (`__AIPreview__`)
+2. **Shape Copying**: Result shapes copied to main document as transparent green overlays
+3. **ViewProvider Styling**: Preview objects use custom transparency and color
+4. **Cleanup**: Preview objects removed on cancel; replaced with real objects on approve
+
+#### Auto-Fix Loop
+
+When preview fails (e.g., code references non-existent objects):
+1. Error captured and sent back to LLM with context
+2. LLM generates corrected code
+3. Retry preview (up to 3 attempts)
+4. Falls back to CodeBlockWidget if all attempts fail
+5. User never sees intermediate errors - just slightly longer "thinking..." animation
+
+#### Signal Flow
+
+```
+ChatWidget signals:
+  - messageSent(str)           → AIPanel._on_send()
+  - previewApproved(str)       → AIPanel._on_preview_approved()
+  - previewCancelled()         → AIPanel._on_preview_cancelled()
+  - planApproved(str)          → AIPanel._on_plan_approved()
+  - planEdited(str)            → AIPanel._on_plan_edited()
+  - planCancelled()            → AIPanel._on_plan_cancelled()
+
+ContextSelectionWidget signals:
+  - selectionChanged()         → Updates context for next request
+
+PreviewWidget signals:
+  - approved()                 → Execute code in main document
+  - cancelled()                → Remove preview shapes
+```
+
+#### LLM Backend
+
+Uses `ClaudeCodeBackend` which spawns `claude` CLI as subprocess:
+- Streams responses via `--output-format stream-json`
+- Handles conversation context via `--continue` flag
+- Falls back gracefully if CLI not available
 
 ### Key Patterns
 - **Property System**: Dynamic properties on DocumentObjects with expression support
