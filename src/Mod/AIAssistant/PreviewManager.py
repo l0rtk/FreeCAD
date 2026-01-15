@@ -31,19 +31,21 @@ class PreviewManager:
         self._main_doc_name: Optional[str] = None
         self._pending_code: str = ""
 
-    def create_preview(self, code: str) -> bool:
+    def create_preview(self, code: str) -> tuple:
         """Execute code in temp doc and show preview in main doc.
 
         Args:
             code: Python code to execute
 
         Returns:
-            True if preview created successfully
+            Tuple of (success: bool, error_message: str)
+            - success: True if preview created successfully
+            - error_message: Empty string on success, error details on failure
         """
         main_doc = FreeCAD.ActiveDocument
         if not main_doc:
             FreeCAD.Console.PrintWarning("AIAssistant: No active document for preview\n")
-            return False
+            return (False, "No active document")
 
         self._main_doc_name = main_doc.Name
         self._pending_code = code
@@ -81,14 +83,16 @@ class PreviewManager:
 
             # Execute code in temp doc
             # Temporarily set temp doc as active
-            original_doc = FreeCAD.ActiveDocument
             FreeCAD.setActiveDocument(self._temp_doc.Name)
 
-            exec(code, exec_globals)
-            self._temp_doc.recompute()
+            try:
+                exec(code, exec_globals)
+                self._temp_doc.recompute()
+            finally:
+                # ALWAYS restore original active document, even on failure
+                if self._main_doc_name and FreeCAD.getDocument(self._main_doc_name):
+                    FreeCAD.setActiveDocument(self._main_doc_name)
 
-            # Restore original active document
-            FreeCAD.setActiveDocument(self._main_doc_name)
             main_doc = FreeCAD.ActiveDocument
 
             # Copy shapes to main doc as preview
@@ -112,14 +116,18 @@ class PreviewManager:
                 pass
 
             FreeCAD.Console.PrintMessage(f"AIAssistant: Created preview with {preview_count} objects\n")
-            return preview_count > 0
+
+            if preview_count > 0:
+                return (True, "")
+            else:
+                return (False, "No preview objects created - code may not produce visible geometry")
 
         except Exception as e:
-            FreeCAD.Console.PrintError(f"AIAssistant: Preview failed: {e}\n")
             import traceback
-            traceback.print_exc()
+            error_msg = f"{type(e).__name__}: {str(e)}\n{traceback.format_exc()}"
+            FreeCAD.Console.PrintError(f"AIAssistant: Preview failed: {e}\n")
             self.clear_preview()
-            return False
+            return (False, error_msg)
 
     def _add_preview_shape(self, doc, source_obj):
         """Add a preview shape to main document.
