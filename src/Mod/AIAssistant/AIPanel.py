@@ -563,6 +563,8 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
 
         # Ask LLM to fix the code
         FreeCAD.Console.PrintMessage(f"AIAssistant: Preview failed, requesting fix from LLM...\n")
+        # Show typing indicator during auto-fix
+        self._chat.show_typing()
         self._request_code_fix(description, code, error_msg, original_response, attempt)
 
     def _request_code_fix(self, description: str, code: str, error: str, original_response: str, attempt: int):
