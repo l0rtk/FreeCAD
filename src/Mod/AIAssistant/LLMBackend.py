@@ -25,15 +25,18 @@ Rules:
 - End with doc.recompute()
 - Use millimeters for dimensions
 - Use descriptive Labels
-- Analyze CURRENT DOCUMENT STATE to understand existing objects
+- Analyze CURRENT DOCUMENT STATE and SOURCE CODE HISTORY to understand existing objects
 - Do NOT recreate existing elements
+- To insert parts from library: PartsLibrary.insert('part_name')
 
 ## IF user asks a QUESTION about the document:
 Return a clear text answer based on CURRENT DOCUMENT STATE.
 Examples: "How many columns?", "What's the total volume?", "List all objects"
 
 Detect intent from the message. Action words (create, add, make, build, move, delete, change) = code.
-Question words (what, how many, list, show, describe, explain) = text answer."""
+Question words (what, how many, list, show, describe, explain) = text answer.
+
+If a screenshot of the current viewport is provided, use it to understand the visual state of the model."""
 
 
 class LLMBackend:
@@ -58,7 +61,13 @@ class LLMBackend:
         except Exception:
             return default
 
-    def chat(self, user_message: str, context: str = "", history: list = None) -> str:
+    def chat(
+        self,
+        user_message: str,
+        context: str = "",
+        history: list = None,
+        screenshot: str = None,
+    ) -> str:
         """
         Send a message to the LLM and get a response.
 
@@ -66,6 +75,7 @@ class LLMBackend:
             user_message: The user's natural language request
             context: Optional document context string
             history: Optional conversation history
+            screenshot: Optional base64-encoded PNG screenshot of viewport
 
         Returns:
             Generated Python code as a string
@@ -87,8 +97,21 @@ class LLMBackend:
         if history:
             messages.extend(history[-6:])  # Last 3 exchanges
 
-        # Add current message
-        messages.append({"role": "user", "content": user_message})
+        # Add current message (with optional screenshot for vision)
+        if screenshot:
+            # Vision format: content is array with text and image
+            messages.append({
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": user_message},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{screenshot}"},
+                    },
+                ],
+            })
+        else:
+            messages.append({"role": "user", "content": user_message})
 
         # Make API request
         payload = {
