@@ -22,6 +22,7 @@ from . import SnapshotManager
 from . import ChangeDetector
 from . import SourceManager
 from . import Theme
+from . import ActivityLogger
 from .ChatWidget import ChatWidget
 from .SessionManager import SessionManager
 from .PreviewManager import PreviewManager
@@ -101,6 +102,9 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
 
         # Ensure CLAUDE.md exists for Claude Code backend
         self._ensure_claude_md()
+
+        # Log panel opened
+        ActivityLogger.log_panel_opened()
 
     def _setup_ui(self):
         """Build the UI."""
@@ -375,9 +379,11 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self.session_manager.clear_current_session()
         self._session_label.hide()
         self._chat.add_system_message("New session started")
+        ActivityLogger.log_session_cleared()
 
     def _on_load_session(self, session_id):
         """Load a previous session."""
+        ActivityLogger.log_session_loaded(session_id)
         messages = self.session_manager.load_session(session_id)
         self._chat.clear_chat()
 
@@ -457,6 +463,9 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
 
         self.pending_input = user_input
 
+        # Log message sent
+        ActivityLogger.log_message_sent(user_input)
+
         # Show typing indicator
         self._chat.show_typing()
         self._chat.set_input_enabled(False)
@@ -482,6 +491,7 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         # Link snapshot to session
         if snapshot_id:
             self.session_manager.add_snapshot_reference(snapshot_id)
+            ActivityLogger.log_snapshot_saved(snapshot_id)
 
         # Get conversation history
         conversation = self._chat.get_conversation_history()
@@ -526,6 +536,14 @@ Do NOT write any code. Only output the numbered plan steps."""
         # Store the code for later execution
         self._last_code = response
 
+        # Log response received
+        tool_calls = getattr(self.llm, 'last_tool_calls', []) or []
+        ActivityLogger.log_response_received(
+            self.llm.last_duration_ms,
+            getattr(self.llm, 'last_cost', 0),
+            len(tool_calls)
+        )
+
         # Log full request/response for debugging
         self.session_manager.log_llm_request(
             user_message=self.pending_input or "",
@@ -536,7 +554,9 @@ Do NOT write any code. Only output the numbered plan steps."""
             model=self.llm.model,
             api_url=self.llm.api_url,
             duration_ms=self.llm.last_duration_ms,
-            success=True
+            success=True,
+            tool_calls=getattr(self.llm, 'last_tool_calls', None),
+            cost_usd=getattr(self.llm, 'last_cost', 0)
         )
 
         # Handle plan mode response (Phase 1)
@@ -550,6 +570,7 @@ Do NOT write any code. Only output the numbered plan steps."""
         # Check if Claude edited source.py directly (new direct editing flow)
         if getattr(self.llm, 'source_was_edited', False):
             FreeCAD.Console.PrintMessage("AIAssistant: Detected direct source.py edit - using diff preview\n")
+            ActivityLogger.log_source_edited(len(tool_calls))
             self._handle_source_edit_response(response)
             self.pending_input = None
             return
@@ -627,6 +648,7 @@ Do NOT write any code. Only output the numbered plan steps."""
                 f"AIAssistant: Diff preview created with {len(preview_items)} changes "
                 f"(deletion={is_deletion})\n"
             )
+            ActivityLogger.log_preview_created(len(preview_items), is_deletion)
 
             # Check if auto-accept is enabled
             auto_approve = self.auto_accept_action.isChecked()
@@ -677,6 +699,7 @@ Do NOT write any code. Only output the numbered plan steps."""
                 f"AIAssistant: Preview created with {len(preview_items)} objects "
                 f"(deletion={is_deletion})\n"
             )
+            ActivityLogger.log_preview_created(len(preview_items), is_deletion)
 
             # Hide typing if shown during retry
             if attempt > 1:
@@ -875,6 +898,9 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
         self._chat.hide_typing()
         self._chat.set_input_enabled(True)
 
+        # Log error
+        ActivityLogger.log_error(error_msg)
+
         # Log failed request for debugging
         self.session_manager.log_llm_request(
             user_message=self.pending_input or "",
@@ -886,7 +912,9 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
             api_url=self.llm.api_url,
             duration_ms=self.llm.last_duration_ms,
             success=False,
-            error=error_msg
+            error=error_msg,
+            tool_calls=getattr(self.llm, 'last_tool_calls', None),
+            cost_usd=getattr(self.llm, 'last_cost', 0)
         )
 
         self._chat.add_error_message(error_msg)
@@ -895,6 +923,7 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
     def _on_preview_approved(self, code: str):
         """Handle user approval of preview - execute code for real."""
         FreeCAD.Console.PrintMessage("AIAssistant: Preview approved - executing code\n")
+        ActivityLogger.log_preview_approved()
 
         # Clear the preview objects
         self._preview_manager.clear_preview()
@@ -970,6 +999,7 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
     def _on_preview_cancelled(self):
         """Handle user cancellation of preview."""
         FreeCAD.Console.PrintMessage("AIAssistant: Preview cancelled\n")
+        ActivityLogger.log_preview_cancelled()
 
         # Clear the preview objects
         self._preview_manager.cancel()
@@ -978,6 +1008,7 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
         if SourceManager.has_backup():
             FreeCAD.Console.PrintMessage("AIAssistant: Restoring source.py from backup\n")
             SourceManager.restore_source()
+            ActivityLogger.log_source_restored()
 
         # Add a system message
         self._chat.add_system_message("Preview cancelled")
@@ -985,18 +1016,21 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
     def _on_plan_approved(self, plan_text: str):
         """Handle plan approval - request code generation (Phase 2)."""
         FreeCAD.Console.PrintMessage("AIAssistant: Plan approved - requesting code generation\n")
+        ActivityLogger.log_plan_approved(plan_text[:50] if plan_text else "")
         self._pending_plan = plan_text
         self._generate_code_from_plan(plan_text)
 
     def _on_plan_edited(self, edited_plan: str):
         """Handle plan edit and approval - request code with edited plan."""
         FreeCAD.Console.PrintMessage("AIAssistant: Plan edited and approved - requesting code generation\n")
+        ActivityLogger.log_plan_edited()
         self._pending_plan = edited_plan
         self._generate_code_from_plan(edited_plan)
 
     def _on_plan_cancelled(self):
         """Handle plan cancellation."""
         FreeCAD.Console.PrintMessage("AIAssistant: Plan cancelled\n")
+        ActivityLogger.log_plan_cancelled()
         self._pending_plan = None
         self._plan_user_request = None
         self._chat.add_system_message("Plan cancelled")
@@ -1065,7 +1099,9 @@ Return ONLY the Python code in a ```python code block."""
             model=self.llm.model,
             api_url=self.llm.api_url,
             duration_ms=self.llm.last_duration_ms,
-            success=True
+            success=True,
+            tool_calls=getattr(self.llm, 'last_tool_calls', None),
+            cost_usd=getattr(self.llm, 'last_cost', 0)
         )
 
         # Parse and show preview as normal
@@ -1093,6 +1129,7 @@ Return ONLY the Python code in a ```python code block."""
 
         # Execute the code
         success, message = CodeExecutor.execute(code)
+        ActivityLogger.log_code_executed(success, message)
 
         # Capture document state AFTER execution
         after_snapshot = SnapshotManager.capture_current_state()
@@ -1131,6 +1168,7 @@ Return ONLY the Python code in a ```python code block."""
         self._on_clear()
         self.session_manager.clear_current_session()
         self._chat.add_system_message("Conversation cleared - new session started")
+        ActivityLogger.log_session_cleared()
 
     def _on_debug_toggled(self, checked: bool):
         """Handle debug mode toggle - reload current session to show/hide debug info."""
@@ -1255,6 +1293,7 @@ Return ONLY the Python code in a ```python code block."""
 
     def closeEvent(self, event):
         """Clean up when panel is closed."""
+        ActivityLogger.log_panel_closed()
         # Stop the console observer
         ContextBuilder.stop_console_observer()
         super().closeEvent(event)

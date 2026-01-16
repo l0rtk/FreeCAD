@@ -100,6 +100,7 @@ MyProject/
 └── MyProject/                   # Project folder (named after document)
     ├── source.py                # Python code (source of truth)
     ├── CLAUDE.md                # Project-level instructions for Claude
+    ├── activity.log             # User interaction and event log
     ├── sessions/                # Conversation history
     │   └── 001_2026-01-16_10-30.json
     └── snapshots/               # Document state captures
@@ -109,6 +110,7 @@ MyProject/
 **Project files:**
 - **source.py** - Python script that generates the design. Claude edits this directly.
 - **CLAUDE.md** - Instructions for Claude when working on this specific project.
+- **activity.log** - Timestamped log of all user interactions and system events.
 - **sessions/** - JSON files storing conversation history, LLM requests, and linked snapshots.
 - **snapshots/** - Point-in-time captures of document state (objects, properties, geometry).
 
@@ -160,6 +162,7 @@ Read source.py         Edit source.py
 | `PreviewManager.py` | Executes source.py, shows preview before commit |
 | `SessionManager.py` | Persists chat sessions and LLM debug data to JSON |
 | `SnapshotManager.py` | Captures document state (objects, shapes, properties) to JSON |
+| `ActivityLogger.py` | Logs all user interactions and events to activity.log |
 | `Theme.py` | Cursor-inspired dark theme styling |
 
 #### SourceManager

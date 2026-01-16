@@ -30,5 +30,6 @@ Return a clear text explanation.
 ## Context Files
 
 - **source.py** - The design expressed as Python code (edit this directly)
+- **activity.log** - Timestamped log of all user interactions and events
 - **snapshots/** - JSON snapshots of document state (objects, geometry)
 - **sessions/** - Conversation history and LLM debug data

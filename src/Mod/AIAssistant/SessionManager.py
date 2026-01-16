@@ -182,7 +182,9 @@ class SessionManager:
         api_url: str = "",
         duration_ms: float = 0,
         success: bool = True,
-        error: str = ""
+        error: str = "",
+        tool_calls: List[dict] = None,
+        cost_usd: float = 0
     ) -> None:
         """
         Log a complete LLM request/response for debugging.
@@ -198,6 +200,8 @@ class SessionManager:
             duration_ms: Request duration in milliseconds
             success: Whether the request succeeded
             error: Error message if failed
+            tool_calls: List of tool calls made (Read, Edit, Glob, Grep)
+            cost_usd: Cost in USD for this request
         """
         # Auto-create session if none exists
         if self._current_session_id is None:
@@ -218,8 +222,10 @@ class SessionManager:
                 "content": response,
                 "success": success,
                 "error": error,
-                "duration_ms": duration_ms
-            }
+                "duration_ms": duration_ms,
+                "cost_usd": cost_usd
+            },
+            "tool_calls": tool_calls or []
         }
 
         # Ensure llm_requests exists (for older sessions)
@@ -265,12 +271,14 @@ class SessionManager:
                         req = llm_requests[llm_request_idx]
                         msg["debug_info"] = {
                             "duration_ms": req.get("response", {}).get("duration_ms", 0),
+                            "cost_usd": req.get("response", {}).get("cost_usd", 0),
                             "model": req.get("request", {}).get("model", "unknown"),
                             "context_length": len(req.get("request", {}).get("context", "")),
                             "system_prompt": req.get("request", {}).get("system_prompt", ""),
                             "context": req.get("request", {}).get("context", ""),
                             "conversation_history": req.get("request", {}).get("conversation_history", []),
                             "user_message": req.get("request", {}).get("user_message", ""),
+                            "tool_calls": req.get("tool_calls", []),
                         }
                         llm_request_idx += 1
                         debug_attached += 1
