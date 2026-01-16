@@ -550,7 +550,12 @@ class PreviewManager:
             FreeCAD.Console.PrintMessage(
                 "AIAssistant: Executing old source.py in sandbox...\n"
             )
-            old_objects, old_shapes = self._execute_source_in_sandbox(old_source)
+            old_objects, old_shapes, old_error = self._execute_source_in_sandbox(old_source)
+            if old_error:
+                # Old source failed - this shouldn't happen normally
+                FreeCAD.Console.PrintWarning(
+                    f"AIAssistant: Old source.py failed (unusual): {old_error[:100]}...\n"
+                )
             FreeCAD.Console.PrintMessage(
                 f"AIAssistant: Old source objects: {sorted(old_objects)}\n"
             )
@@ -559,7 +564,13 @@ class PreviewManager:
             FreeCAD.Console.PrintMessage(
                 "AIAssistant: Executing new source.py in sandbox...\n"
             )
-            new_objects, new_shapes = self._execute_source_in_sandbox(new_source)
+            new_objects, new_shapes, new_error = self._execute_source_in_sandbox(new_source)
+            if new_error:
+                # New source failed - return error so AIPanel can request fix from Claude
+                FreeCAD.Console.PrintError(
+                    f"AIAssistant: New source.py execution failed\n"
+                )
+                return (False, f"EXECUTION_ERROR:{new_error}")
             FreeCAD.Console.PrintMessage(
                 f"AIAssistant: New source objects: {sorted(new_objects)}\n"
             )
@@ -668,15 +679,18 @@ class PreviewManager:
             self.clear_preview()
             return (False, error_msg)
 
-    def _execute_source_in_sandbox(self, source_code: str) -> Tuple[set, Dict]:
+    def _execute_source_in_sandbox(self, source_code: str) -> Tuple[set, Dict, str]:
         """Execute source code in temp doc, return object names and shapes.
 
         Args:
             source_code: Python source code to execute
 
         Returns:
-            Tuple of (object_names: set, shapes: dict mapping name -> Shape)
+            Tuple of (object_names: set, shapes: dict mapping name -> Shape, error: str)
+            If execution fails, error contains the full traceback.
         """
+        import traceback
+
         temp_doc = None
         try:
             temp_doc = FreeCAD.newDocument("__AIDiffSandbox__", hidden=True)
@@ -710,11 +724,12 @@ class PreviewManager:
                 exec(source_code, exec_globals)
                 temp_doc.recompute()
             except Exception as exec_error:
+                error_msg = f"{type(exec_error).__name__}: {exec_error}\n{traceback.format_exc()}"
                 FreeCAD.Console.PrintError(
                     f"AIAssistant: Sandbox exec failed: {exec_error}\n"
                 )
-                # Return empty set on failure
-                return set(), {}
+                # Return empty set with error message
+                return set(), {}, error_msg
             finally:
                 if self._main_doc_name and FreeCAD.getDocument(self._main_doc_name):
                     FreeCAD.setActiveDocument(self._main_doc_name)
@@ -729,7 +744,7 @@ class PreviewManager:
                 if hasattr(obj, 'Shape') and obj.Shape and not obj.Shape.isNull():
                     shapes[obj.Name] = obj.Shape.copy()
 
-            return object_names, shapes
+            return object_names, shapes, ""  # Empty string = no error
 
         finally:
             # Close temp doc

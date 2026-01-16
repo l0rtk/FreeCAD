@@ -27,6 +27,34 @@ Return a clear text explanation.
 - Use descriptive Labels for objects
 - Use object Names (not Labels) when referencing in code
 
+## When Unsure About FreeCAD API
+
+You have access to the entire FreeCAD codebase. When unsure about API usage:
+
+1. **Search for examples** using Grep to find how an API is used:
+   ```
+   Grep pattern="makeHelix" path="{{FREECAD_SOURCE}}"
+   Grep pattern="makePipe" path="{{FREECAD_SOURCE}}"
+   ```
+
+2. **Look at test files** - they contain working examples:
+   ```
+   Grep pattern="Part.makeBox" path="{{FREECAD_SOURCE}}" glob="*Test*.py"
+   ```
+
+3. **Check workbench implementations** for complex operations:
+   - Part module: `{{FREECAD_SOURCE}}/Mod/Part/`
+   - PartDesign module: `{{FREECAD_SOURCE}}/Mod/PartDesign/`
+   - Draft module: `{{FREECAD_SOURCE}}/Mod/Draft/`
+
+4. **Common API gotchas to avoid**:
+   - Circular edges have only 1 vertex (don't access `edge.Vertexes[1]`)
+   - Edge/face indices change after boolean operations
+   - Use `edge.Length` and `edge.BoundBox` instead of vertex indices for edge detection
+   - Helix/sweep operations need proper wire preparation
+
+**Always search for working examples before using unfamiliar API calls.**
+
 ## Context Files
 
 - **source.py** - The design expressed as Python code (edit this directly)

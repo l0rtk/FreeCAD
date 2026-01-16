@@ -618,7 +618,7 @@ Do NOT write any code. Only output the numbered plan steps."""
 
         self.pending_input = None
 
-    def _handle_source_edit_response(self, response: str):
+    def _handle_source_edit_response(self, response: str, attempt: int = 1):
         """Handle response where Claude edited source.py directly.
 
         This is the new direct source editing flow:
@@ -627,9 +627,11 @@ Do NOT write any code. Only output the numbered plan steps."""
         3. Create diff preview showing what changed
         4. On approve: execute new source.py
         5. On cancel: restore from backup
+        6. On execution error: request fix from Claude and retry
 
         Args:
             response: Claude's text response (explanation of changes)
+            attempt: Current attempt number (1-based) for auto-fix loop
         """
         old_source = SourceManager.get_backup_content()
         new_source = SourceManager.read_source()
@@ -649,10 +651,13 @@ Do NOT write any code. Only output the numbered plan steps."""
             return
 
         # Create diff preview - execute OLD vs NEW, show differences
-        FreeCAD.Console.PrintMessage("AIAssistant: Creating diff preview...\n")
+        FreeCAD.Console.PrintMessage(f"AIAssistant: Creating diff preview (attempt {attempt})...\n")
         success, error_msg = self._preview_manager.create_diff_preview(old_source, new_source)
 
         if success:
+            # Hide typing indicator (may have been shown during auto-fix attempts)
+            self._chat.hide_typing()
+
             # Get preview summary
             preview_items = self._preview_manager.get_preview_summary()
             is_deletion = self._preview_manager.is_deletion_preview()
@@ -680,9 +685,36 @@ Do NOT write any code. Only output the numbered plan steps."""
                 auto_approve=auto_approve,
                 tool_calls=tool_calls
             )
+        elif error_msg.startswith("EXECUTION_ERROR:"):
+            # Execution error - try to auto-fix by asking Claude to fix source.py
+            exec_error = error_msg[len("EXECUTION_ERROR:"):]
+            FreeCAD.Console.PrintWarning(
+                f"AIAssistant: Source execution failed (attempt {attempt}): {exec_error[:200]}...\n"
+            )
+
+            if attempt >= MAX_FIX_ATTEMPTS:
+                # Give up after max attempts
+                FreeCAD.Console.PrintWarning(
+                    f"AIAssistant: Max auto-fix attempts ({MAX_FIX_ATTEMPTS}) reached, giving up\n"
+                )
+                self._chat.hide_typing()
+                SourceManager.restore_source()
+                self._chat.add_error_message(
+                    f"Code execution failed after {MAX_FIX_ATTEMPTS} fix attempts.\n\n"
+                    f"Last error:\n```\n{exec_error[:500]}\n```"
+                )
+                return
+
+            # Request fix from Claude
+            FreeCAD.Console.PrintMessage(
+                f"AIAssistant: Requesting fix from Claude (attempt {attempt + 1})...\n"
+            )
+            self._chat.show_typing()
+            self._request_source_fix(new_source, exec_error, response, attempt)
         else:
-            # Diff preview failed - restore backup and show error
+            # Other diff preview failure - restore backup and show error
             FreeCAD.Console.PrintWarning(f"AIAssistant: Diff preview failed: {error_msg}\n")
+            self._chat.hide_typing()
             SourceManager.restore_source()
             self._chat.add_error_message(f"Preview failed: {error_msg}")
 
@@ -829,6 +861,77 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
         # Fall back to showing original response
         if self._last_code:
             self._show_traditional_response(self._last_code)
+
+    def _request_source_fix(self, failed_source: str, error: str, original_response: str, attempt: int):
+        """Send execution error to Claude and request fixed source.py.
+
+        This is used when Claude's edited source.py fails to execute in sandbox.
+        Claude will use the Edit tool to fix source.py directly.
+
+        Args:
+            failed_source: The source.py content that failed
+            error: Error message/traceback from execution
+            original_response: Claude's original response text
+            attempt: Current attempt number
+        """
+        # Store for retry handling
+        self._source_fix_original_response = original_response
+        self._source_fix_attempt = attempt
+
+        fix_prompt = f"""The source.py you just edited failed to execute with this error:
+
+```
+{error[:1500]}
+```
+
+Please fix the source.py file using the Edit tool. Common issues:
+- Accessing edge.Vertexes[1] on circular edges (circles only have 1 vertex)
+- Assuming specific edge/face indices after boolean operations
+- Using undefined variables
+
+Read source.py to understand what went wrong, then fix it."""
+
+        # Start background worker for fix request
+        self._source_fix_worker = LLMWorker(self.llm, fix_prompt, "", [])
+        self._source_fix_worker.finished.connect(self._on_source_fix_response)
+        self._source_fix_worker.error.connect(self._on_source_fix_error)
+        self._source_fix_worker.start()
+
+    def _on_source_fix_response(self, response: str):
+        """Handle response from source fix request.
+
+        After Claude fixes source.py, retry the diff preview.
+
+        Args:
+            response: Claude's response (explanation of fix)
+        """
+        attempt = getattr(self, '_source_fix_attempt', 1)
+        original_response = getattr(self, '_source_fix_original_response', response)
+
+        # Check if Claude edited source.py
+        if getattr(self.llm, 'source_was_edited', False):
+            FreeCAD.Console.PrintMessage(
+                f"AIAssistant: Claude fixed source.py, retrying preview (attempt {attempt + 1})\n"
+            )
+            # Retry the diff preview with the fixed source
+            self._handle_source_edit_response(original_response, attempt + 1)
+        else:
+            # Claude didn't edit source.py - show error
+            FreeCAD.Console.PrintWarning(
+                "AIAssistant: Claude didn't edit source.py in fix response\n"
+            )
+            self._chat.hide_typing()
+            SourceManager.restore_source()
+            self._chat.add_error_message(
+                f"Could not auto-fix source.py. Claude's response:\n\n{response}"
+            )
+
+    def _on_source_fix_error(self, error_msg: str):
+        """Handle error from source fix request."""
+        FreeCAD.Console.PrintError(f"AIAssistant: Source fix request failed: {error_msg}\n")
+        self._chat.hide_typing()
+        SourceManager.restore_source()
+        self._chat.add_error_message(f"Auto-fix failed: {error_msg}")
 
     def _parse_response(self, response: str) -> tuple:
         """Parse LLM response to extract description and code.
@@ -1240,12 +1343,19 @@ Return ONLY the Python code in a ```python code block."""
         if claude_md_path.exists():
             return
 
-        # Copy template
+        # Copy template with substitutions
         try:
             template_path = Path(__file__).parent / "project_claude_template.md"
             if template_path.exists():
-                import shutil
-                shutil.copy(template_path, claude_md_path)
+                # Get FreeCAD source directory (parent of AIAssistant module)
+                freecad_source = str(Path(__file__).parent.parent.parent)
+
+                # Read template and substitute placeholders
+                template_content = template_path.read_text()
+                content = template_content.replace("{{FREECAD_SOURCE}}", freecad_source)
+
+                # Write substituted content
+                claude_md_path.write_text(content)
                 FreeCAD.Console.PrintMessage(
                     f"AIAssistant: Created CLAUDE.md in {self._project_dir}\n"
                 )
