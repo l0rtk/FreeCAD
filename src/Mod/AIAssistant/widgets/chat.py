@@ -34,6 +34,8 @@ class ChatListWidget(QtWidgets.QScrollArea):
         self._message_widgets = []
         self._typing_indicator = None
         self._model = ChatMessageModel()
+        self._active_previews = []  # Track active preview widgets
+        self._active_plans = []     # Track active plan widgets
         self._setup_ui()
 
     def _setup_ui(self):
@@ -60,8 +62,22 @@ class ChatListWidget(QtWidgets.QScrollArea):
 
         self.setWidget(self._container)
 
+    def disable_active_previews(self):
+        """Disable any active preview/plan widgets (called when user sends new message)."""
+        for preview in self._active_previews:
+            preview.set_disabled(True)
+        self._active_previews.clear()
+
+        for plan in self._active_plans:
+            plan.set_disabled(True)
+        self._active_plans.clear()
+
     def add_message(self, text: str, role: str, debug_info: dict = None) -> int:
         """Add a new message to the chat."""
+        # Disable any active previews when user sends a new message
+        if role == "user":
+            self.disable_active_previews()
+
         row = self._model.add_message(text, role)
         message = self._model.get_message(row)
         widget = MessageCard(message, debug_info=debug_info)
@@ -168,6 +184,11 @@ class ChatListWidget(QtWidgets.QScrollArea):
             auto_approve: If True, auto-approve after 500ms delay
             tool_calls: Optional list of tool calls made during code generation
         """
+        # Disable any previous active previews (prevents clicking old ones)
+        for old_preview in self._active_previews:
+            old_preview.set_disabled(True)
+        self._active_previews.clear()
+
         # Show tool activity before preview (if any)
         if tool_calls and len(tool_calls) > 0:
             activity_widget = ActivityWidget(tool_calls)
@@ -186,18 +207,23 @@ class ChatListWidget(QtWidgets.QScrollArea):
 
         self._layout.insertWidget(self._layout.count() - 1, widget)
         self._message_widgets.append(widget)
+        self._active_previews.append(widget)  # Track as active
 
         QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
         return row
 
     def _on_preview_approved(self, code: str, widget: PreviewWidget):
         """Handle preview approval."""
-        widget.set_disabled(True)
+        widget.set_disabled(True, completed=True)  # Show "Applied"
+        if widget in self._active_previews:
+            self._active_previews.remove(widget)
         self.previewApproved.emit(code)
 
     def _on_preview_cancelled(self, widget: PreviewWidget):
         """Handle preview cancellation."""
         widget.set_disabled(True)
+        if widget in self._active_previews:
+            self._active_previews.remove(widget)
         self.previewCancelled.emit()
 
     def add_plan_message(self, plan_text: str, user_request: str = ""):
@@ -207,6 +233,11 @@ class ChatListWidget(QtWidgets.QScrollArea):
             plan_text: The plan text from LLM
             user_request: Original user request (for context)
         """
+        # Disable any previous active plans (prevents clicking old ones)
+        for old_plan in self._active_plans:
+            old_plan.set_disabled(True)
+        self._active_plans.clear()
+
         row = self._model.add_message(
             text="Execution Plan",
             role=MessageRole.SYSTEM
@@ -219,6 +250,7 @@ class ChatListWidget(QtWidgets.QScrollArea):
 
         self._layout.insertWidget(self._layout.count() - 1, widget)
         self._message_widgets.append(widget)
+        self._active_plans.append(widget)  # Track as active
 
         QtCore.QTimer.singleShot(50, self._scroll_to_bottom)
         return row
@@ -226,16 +258,22 @@ class ChatListWidget(QtWidgets.QScrollArea):
     def _on_plan_approved(self, plan_text: str, widget: PlanWidget):
         """Handle plan approval."""
         widget.set_disabled(True)
+        if widget in self._active_plans:
+            self._active_plans.remove(widget)
         self.planApproved.emit(plan_text)
 
     def _on_plan_edited(self, edited_text: str, widget: PlanWidget):
         """Handle plan edit and approval."""
         widget.set_disabled(True)
+        if widget in self._active_plans:
+            self._active_plans.remove(widget)
         self.planEdited.emit(edited_text)
 
     def _on_plan_cancelled(self, widget: PlanWidget):
         """Handle plan cancellation."""
         widget.set_disabled(True)
+        if widget in self._active_plans:
+            self._active_plans.remove(widget)
         self.planCancelled.emit()
 
     def add_activity_message(self, tool_calls: List[Dict]):

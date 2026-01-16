@@ -326,12 +326,33 @@ class PreviewWidget(QtWidgets.QFrame):
 
     def _on_approve(self):
         """Handle approve button click."""
+        # Disable buttons immediately to prevent double-clicks
+        self._approve_btn.setEnabled(False)
+        self._cancel_btn.setEnabled(False)
+        self._approve_btn.setText("Applying...")
+        self._approve_btn.setCursor(QtCore.Qt.WaitCursor)
+        self._approve_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {Theme.COLORS['bg_tertiary']};
+                color: {Theme.COLORS['text_muted']};
+                border: none;
+                border-radius: {Theme.RADIUS['sm']};
+                padding: 10px 24px;
+                font-size: {Theme.FONTS['size_base']};
+                font-weight: {Theme.FONTS['weight_medium']};
+            }}
+        """)
         self.approved.emit()
 
     def _on_cancel(self):
         """Handle cancel button click."""
         # Stop auto-approve if in progress
         self._auto_approve_cancelled = True
+        # Disable buttons immediately to prevent double-clicks
+        self._approve_btn.setEnabled(False)
+        self._cancel_btn.setEnabled(False)
+        self._cancel_btn.setText("Cancelling...")
+        self._cancel_btn.setCursor(QtCore.Qt.WaitCursor)
         self.cancelled.emit()
 
     def _start_auto_approve_countdown(self):
@@ -343,15 +364,53 @@ class PreviewWidget(QtWidgets.QFrame):
         if not self._auto_approve_cancelled:
             self.approved.emit()
 
-    def set_disabled(self, disabled: bool):
-        """Disable/enable the widget after approval/cancellation."""
-        self.setEnabled(not disabled)
+    def set_disabled(self, disabled: bool, completed: bool = False):
+        """Disable/enable the widget after approval/cancellation.
+
+        Args:
+            disabled: Whether to disable the widget
+            completed: If True, show "Applied" instead of keeping "Applying..."
+        """
         if disabled:
+            # Explicitly disable buttons to prevent clicks
+            self._approve_btn.setEnabled(False)
+            self._cancel_btn.setEnabled(False)
+            self._code_btn.setEnabled(False)
+
+            # Update button text based on completion state
+            if completed:
+                self._approve_btn.setText("Applied")
+                self._cancel_btn.setVisible(False)  # Hide cancel after completion
+
+            # Visual feedback - grey out buttons
+            self._approve_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Theme.COLORS['bg_tertiary']};
+                    color: {Theme.COLORS['text_muted']};
+                    border: none;
+                    border-radius: {Theme.RADIUS['sm']};
+                    padding: 10px 24px;
+                    font-size: {Theme.FONTS['size_base']};
+                    font-weight: {Theme.FONTS['weight_medium']};
+                }}
+            """)
+            self._cancel_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: transparent;
+                    color: {Theme.COLORS['text_muted']};
+                    border: 1px solid {Theme.COLORS['border_subtle']};
+                    border-radius: {Theme.RADIUS['sm']};
+                    padding: 10px 20px;
+                    font-size: {Theme.FONTS['size_base']};
+                    font-weight: {Theme.FONTS['weight_medium']};
+                }}
+            """)
+
+            # Grey out the whole widget
             self.setStyleSheet(f"""
                 #PreviewWidget {{
                     background-color: {Theme.COLORS['bg_tertiary']};
                     border: 1px solid {Theme.COLORS['border_subtle']};
                     border-radius: {Theme.RADIUS['lg']};
-                    opacity: 0.5;
                 }}
             """)

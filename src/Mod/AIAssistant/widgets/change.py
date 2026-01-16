@@ -101,6 +101,7 @@ class ChangeWidget(QtWidgets.QFrame):
         super().__init__(parent)
         self._change_set = change_set
         self._code_visible = False
+        self._items_visible = False  # Start collapsed
         self._code_widget = None
         self._setup_ui()
         self._setup_entry_animation()
@@ -119,9 +120,10 @@ class ChangeWidget(QtWidgets.QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # Header
-        header = QtWidgets.QWidget()
-        header.setStyleSheet(f"""
+        # Header - clickable to expand/collapse
+        self._header = QtWidgets.QWidget()
+        self._header.setCursor(QtCore.Qt.PointingHandCursor)
+        self._header.setStyleSheet(f"""
             QWidget {{
                 background-color: {Theme.COLORS['bg_tertiary']};
                 border-top-left-radius: {Theme.RADIUS['lg']};
@@ -129,10 +131,23 @@ class ChangeWidget(QtWidgets.QFrame):
                 border-bottom: 1px solid {Theme.COLORS['border_subtle']};
             }}
         """)
-        header.setFixedHeight(40)
-        header_layout = QtWidgets.QHBoxLayout(header)
+        self._header.setFixedHeight(40)
+        self._header.mousePressEvent = self._on_header_click
+        header_layout = QtWidgets.QHBoxLayout(self._header)
         header_layout.setContentsMargins(14, 0, 10, 0)
         header_layout.setSpacing(10)
+
+        # Chevron icon for expand/collapse indicator
+        self._chevron = QtWidgets.QLabel("▶")
+        self._chevron.setStyleSheet(f"""
+            QLabel {{
+                color: {Theme.COLORS['text_muted']};
+                font-size: 10px;
+                background: transparent;
+            }}
+        """)
+        self._chevron.setFixedWidth(14)
+        header_layout.addWidget(self._chevron)
 
         # Title with inline count badges
         title_label = QtWidgets.QLabel("Changes")
@@ -195,23 +210,24 @@ class ChangeWidget(QtWidgets.QFrame):
             self._run_btn.clicked.connect(self._on_run)
             header_layout.addWidget(self._run_btn)
 
-        layout.addWidget(header)
+        layout.addWidget(self._header)
 
-        # Changes content
-        content = QtWidgets.QWidget()
-        content.setStyleSheet(f"""
+        # Changes content - collapsible, hidden by default
+        self._content = QtWidgets.QWidget()
+        self._content.setStyleSheet(f"""
             QWidget {{
                 background-color: {Theme.COLORS['bg_primary']};
             }}
         """)
-        self._content_layout = QtWidgets.QVBoxLayout(content)
+        self._content.setVisible(self._items_visible)  # Start collapsed
+        self._content_layout = QtWidgets.QVBoxLayout(self._content)
         self._content_layout.setContentsMargins(14, 12, 14, 12)
         self._content_layout.setSpacing(6)
 
         # Add change items
         self._add_change_items()
 
-        layout.addWidget(content)
+        layout.addWidget(self._content)
 
         # Code section (initially hidden)
         self._code_container = QtWidgets.QWidget()
@@ -346,6 +362,12 @@ class ChangeWidget(QtWidgets.QFrame):
             """)
             no_changes.setAlignment(QtCore.Qt.AlignCenter)
             self._content_layout.addWidget(no_changes)
+
+    def _on_header_click(self, event):
+        """Toggle items visibility when header is clicked."""
+        self._items_visible = not self._items_visible
+        self._content.setVisible(self._items_visible)
+        self._chevron.setText("▼" if self._items_visible else "▶")
 
     def _toggle_code(self):
         """Toggle code visibility."""
