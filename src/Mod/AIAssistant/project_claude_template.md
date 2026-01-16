@@ -30,6 +30,6 @@ Return a clear text explanation.
 ## Context Files
 
 - **source.py** - The design expressed as Python code (edit this directly)
-- **activity.log** - Timestamped log of all user interactions and events
+- **activity.ndjson** - NDJSON log of all interactions (one JSON object per line)
 - **snapshots/** - JSON snapshots of document state (objects, geometry)
 - **sessions/** - Conversation history and LLM debug data

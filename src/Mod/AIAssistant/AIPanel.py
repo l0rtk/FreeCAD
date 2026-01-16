@@ -464,7 +464,7 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         self.pending_input = user_input
 
         # Log message sent
-        ActivityLogger.log_message_sent(user_input)
+        ActivityLogger.log_message_sent(user_input, session_id=self.session_manager.get_current_session_id())
 
         # Show typing indicator
         self._chat.show_typing()
@@ -491,7 +491,10 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
         # Link snapshot to session
         if snapshot_id:
             self.session_manager.add_snapshot_reference(snapshot_id)
-            ActivityLogger.log_snapshot_saved(snapshot_id)
+            # Get object count from document
+            doc = FreeCAD.ActiveDocument
+            obj_count = len(doc.Objects) if doc else 0
+            ActivityLogger.log_snapshot_saved(snapshot_id, object_count=obj_count)
 
         # Get conversation history
         conversation = self._chat.get_conversation_history()
@@ -538,11 +541,21 @@ Do NOT write any code. Only output the numbered plan steps."""
 
         # Log response received
         tool_calls = getattr(self.llm, 'last_tool_calls', []) or []
+        session_id = self.session_manager.get_current_session_id()
         ActivityLogger.log_response_received(
             self.llm.last_duration_ms,
             getattr(self.llm, 'last_cost', 0),
-            len(tool_calls)
+            len(tool_calls),
+            model=self.llm.model,
+            session_id=session_id
         )
+
+        # Log full tool calls
+        if tool_calls:
+            ActivityLogger.log_tool_calls(tool_calls, session_id=session_id)
+
+        # Log full response text
+        ActivityLogger.log_llm_response(response, session_id=session_id)
 
         # Log full request/response for debugging
         self.session_manager.log_llm_request(
@@ -570,7 +583,7 @@ Do NOT write any code. Only output the numbered plan steps."""
         # Check if Claude edited source.py directly (new direct editing flow)
         if getattr(self.llm, 'source_was_edited', False):
             FreeCAD.Console.PrintMessage("AIAssistant: Detected direct source.py edit - using diff preview\n")
-            ActivityLogger.log_source_edited(len(tool_calls))
+            ActivityLogger.log_source_edited(len(tool_calls), file_path=SourceManager.get_source_path())
             self._handle_source_edit_response(response)
             self.pending_input = None
             return
@@ -899,7 +912,7 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
         self._chat.set_input_enabled(True)
 
         # Log error
-        ActivityLogger.log_error(error_msg)
+        ActivityLogger.log_error(error_msg, context=self.pending_input)
 
         # Log failed request for debugging
         self.session_manager.log_llm_request(
@@ -1016,14 +1029,14 @@ Return ONLY the fixed Python code in a ```python code block, no explanation need
     def _on_plan_approved(self, plan_text: str):
         """Handle plan approval - request code generation (Phase 2)."""
         FreeCAD.Console.PrintMessage("AIAssistant: Plan approved - requesting code generation\n")
-        ActivityLogger.log_plan_approved(plan_text[:50] if plan_text else "")
+        ActivityLogger.log_plan_approved(plan_text)
         self._pending_plan = plan_text
         self._generate_code_from_plan(plan_text)
 
     def _on_plan_edited(self, edited_plan: str):
         """Handle plan edit and approval - request code with edited plan."""
         FreeCAD.Console.PrintMessage("AIAssistant: Plan edited and approved - requesting code generation\n")
-        ActivityLogger.log_plan_edited()
+        ActivityLogger.log_plan_edited(edited=edited_plan)
         self._pending_plan = edited_plan
         self._generate_code_from_plan(edited_plan)
 
@@ -1129,7 +1142,7 @@ Return ONLY the Python code in a ```python code block."""
 
         # Execute the code
         success, message = CodeExecutor.execute(code)
-        ActivityLogger.log_code_executed(success, message)
+        ActivityLogger.log_code_executed(success, message, code=code)
 
         # Capture document state AFTER execution
         after_snapshot = SnapshotManager.capture_current_state()
