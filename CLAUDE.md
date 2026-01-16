@@ -96,10 +96,21 @@ Natural language CAD modeling assistant. Uses a code-as-source-of-truth architec
 **Project structure:**
 ```
 MyProject/
-├── MyProject.FCStd          # FreeCAD document (GUI state)
-└── MyProject/
-    └── source.py            # Python code (source of truth)
+├── MyProject.FCStd              # FreeCAD document (GUI state)
+└── MyProject/                   # Project folder (named after document)
+    ├── source.py                # Python code (source of truth)
+    ├── CLAUDE.md                # Project-level instructions for Claude
+    ├── sessions/                # Conversation history
+    │   └── 001_2026-01-16_10-30.json
+    └── snapshots/               # Document state captures
+        └── 001_2026-01-16_10-30.json
 ```
+
+**Project files:**
+- **source.py** - Python script that generates the design. Claude edits this directly.
+- **CLAUDE.md** - Instructions for Claude when working on this specific project.
+- **sessions/** - JSON files storing conversation history, LLM requests, and linked snapshots.
+- **snapshots/** - Point-in-time captures of document state (objects, properties, geometry).
 
 #### How It Works
 
@@ -147,6 +158,8 @@ Read source.py         Edit source.py
 | `AIPanel.py` | Main dock widget, orchestrates requests and UI |
 | `ChatWidget.py` | Chat message display |
 | `PreviewManager.py` | Executes source.py, shows preview before commit |
+| `SessionManager.py` | Persists chat sessions and LLM debug data to JSON |
+| `SnapshotManager.py` | Captures document state (objects, shapes, properties) to JSON |
 | `Theme.py` | Cursor-inspired dark theme styling |
 
 #### SourceManager

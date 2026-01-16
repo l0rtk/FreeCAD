@@ -17,14 +17,14 @@ import FreeCADGui
 def get_snapshots_dir() -> Optional[Path]:
     """Get snapshots directory for the active document.
 
-    Uses project subfolder: {doc_stem}/.freecad_ai/snapshots/
+    Uses project subfolder: {doc_stem}/snapshots/
     """
     try:
         doc = FreeCAD.ActiveDocument
         if doc and doc.FileName:
             doc_path = Path(doc.FileName)
-            # Create project subfolder: parent/doc_stem/.freecad_ai/snapshots/
-            snapshots_dir = doc_path.parent / doc_path.stem / ".freecad_ai" / "snapshots"
+            # Create project subfolder: parent/doc_stem/snapshots/
+            snapshots_dir = doc_path.parent / doc_path.stem / "snapshots"
             snapshots_dir.mkdir(parents=True, exist_ok=True)
             return snapshots_dir
     except Exception:

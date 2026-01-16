@@ -17,14 +17,14 @@ import FreeCAD
 def get_project_sessions_dir() -> Optional[Path]:
     """Get sessions directory for the active document.
 
-    Uses project subfolder: {doc_stem}/.freecad_ai/sessions/
+    Uses project subfolder: {doc_stem}/sessions/
     """
     try:
         doc = FreeCAD.ActiveDocument
         if doc and doc.FileName:
             doc_path = Path(doc.FileName)
-            # Create project subfolder: parent/doc_stem/.freecad_ai/sessions/
-            sessions_dir = doc_path.parent / doc_path.stem / ".freecad_ai" / "sessions"
+            # Create project subfolder: parent/doc_stem/sessions/
+            sessions_dir = doc_path.parent / doc_path.stem / "sessions"
             sessions_dir.mkdir(parents=True, exist_ok=True)
             return sessions_dir
     except Exception:
@@ -95,15 +95,12 @@ class SessionManager:
             return project_dir
         return get_global_sessions_dir()
 
-    def new_session(self, document_name: str = None) -> str:
+    def new_session(self) -> str:
         """
         Create a new session.
 
         Uses counter-based naming: {counter:03d}_{date}_{time}.json
         Example: 001_2026-01-16_16-57.json
-
-        Args:
-            document_name: Optional FreeCAD document name to associate.
 
         Returns:
             The new session ID (counter + timestamp based).
@@ -115,7 +112,7 @@ class SessionManager:
         timestamp = now.strftime("%Y-%m-%d_%H-%M")
         session_id = f"{counter:03d}_{timestamp}"
 
-        # Get document filename if available
+        # Get document filename
         document_filename = ""
         try:
             if FreeCAD.ActiveDocument and FreeCAD.ActiveDocument.FileName:
@@ -128,7 +125,6 @@ class SessionManager:
             "session_id": session_id,
             "created": now.isoformat(),
             "updated": now.isoformat(),
-            "document_name": document_name or "",
             "document_filename": document_filename,
             "messages": [],
             "llm_requests": [],  # Debug: full LLM request/response data
@@ -147,13 +143,7 @@ class SessionManager:
         """
         # Auto-create session if none exists
         if self._current_session_id is None:
-            doc_name = None
-            try:
-                if FreeCAD.ActiveDocument:
-                    doc_name = FreeCAD.ActiveDocument.Name
-            except Exception:
-                pass
-            self.new_session(doc_name)
+            self.new_session()
 
         # Convert message to dict
         message_dict = {
@@ -211,13 +201,7 @@ class SessionManager:
         """
         # Auto-create session if none exists
         if self._current_session_id is None:
-            doc_name = None
-            try:
-                if FreeCAD.ActiveDocument:
-                    doc_name = FreeCAD.ActiveDocument.Name
-            except Exception:
-                pass
-            self.new_session(doc_name)
+            self.new_session()
 
         # Build debug entry
         debug_entry = {
@@ -302,7 +286,7 @@ class SessionManager:
         List all available sessions.
 
         Returns:
-            List of session summaries: {session_id, created, message_count, document_name}
+            List of session summaries: {session_id, created, message_count, document_filename, preview}
         """
         sessions = []
 
@@ -315,7 +299,7 @@ class SessionManager:
                         "created": data.get("created", ""),
                         "updated": data.get("updated", ""),
                         "message_count": len(data.get("messages", [])),
-                        "document_name": data.get("document_name", ""),
+                        "document_filename": data.get("document_filename", ""),
                         "preview": self._get_preview(data.get("messages", []))
                     })
             except Exception:

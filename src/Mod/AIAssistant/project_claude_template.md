@@ -30,5 +30,5 @@ Return a clear text explanation.
 ## Context Files
 
 - **source.py** - The design expressed as Python code (edit this directly)
-- **snapshots/** - JSON snapshots of object state
-- **sessions/** - Conversation history
+- **snapshots/** - JSON snapshots of document state (objects, geometry)
+- **sessions/** - Conversation history and LLM debug data
