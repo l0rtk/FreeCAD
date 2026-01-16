@@ -28,6 +28,7 @@ SET(AIAssistant_SRCS
     StepPreviewWidget.py
     ContextSelectionWidget.py
     ActivityWidget.py
+    ActivityLogger.py
     LLMBackend.py
     project_claude_template.md
 )

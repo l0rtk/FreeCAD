@@ -162,8 +162,7 @@ class ClaudeCodeBackend:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                cwd=cwd,
-                env={**os.environ}  # Inherit ANTHROPIC_API_KEY
+                cwd=cwd
             )
 
             # Write prompt to stdin and close
