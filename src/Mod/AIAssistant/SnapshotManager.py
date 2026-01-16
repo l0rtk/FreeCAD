@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: LGPL-2.1-or-later
 """
-Snapshot Manager - Captures comprehensive object state to JSON files and Python scripts.
+Snapshot Manager - Captures comprehensive object state to JSON files.
 
-Saves full object data to project folder on each AI request for future context enrichment.
+Saves full object data to project folder on each AI request for change detection.
 Storage: {doc_stem}/.freecad_ai/snapshots/ in project subfolder.
 """
 
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 import FreeCAD
 import FreeCADGui
 
@@ -330,119 +330,6 @@ def _build_dependency_graph(objects) -> Dict:
     return graph
 
 
-def _generate_python_script(snapshot: Dict) -> str:
-    """Generate a Python script that can recreate the objects from the snapshot."""
-    lines = [
-        "# Auto-generated FreeCAD reconstruction script",
-        f"# Generated: {snapshot['timestamp']}",
-        f"# Document: {snapshot['document']['name']}",
-        "#",
-        "# Run this script in FreeCAD to recreate the objects.",
-        "",
-        "import FreeCAD",
-        "import Part",
-        "",
-        "# Get or create document",
-        f"doc_name = \"{snapshot['document']['name']}\"",
-        "if FreeCAD.ActiveDocument is None:",
-        "    doc = FreeCAD.newDocument(doc_name)",
-        "else:",
-        "    doc = FreeCAD.ActiveDocument",
-        "",
-    ]
-
-    for obj_data in snapshot.get("objects", []):
-        obj_name = obj_data["name"]
-        obj_label = obj_data["label"]
-        obj_type = obj_data["type"]
-
-        lines.append(f"# --- {obj_label} ({obj_type}) ---")
-
-        # Generate reconstruction based on object type
-        if obj_type == "Part::Box":
-            props = obj_data.get("properties", {})
-            length = props.get("Length", {}).get("value", 10)
-            width = props.get("Width", {}).get("value", 10)
-            height = props.get("Height", {}).get("value", 10)
-            lines.append(f"{obj_name} = doc.addObject('Part::Box', '{obj_name}')")
-            lines.append(f"{obj_name}.Label = '{obj_label}'")
-            lines.append(f"{obj_name}.Length = {length}")
-            lines.append(f"{obj_name}.Width = {width}")
-            lines.append(f"{obj_name}.Height = {height}")
-
-        elif obj_type == "Part::Cylinder":
-            props = obj_data.get("properties", {})
-            radius = props.get("Radius", {}).get("value", 5)
-            height = props.get("Height", {}).get("value", 10)
-            lines.append(f"{obj_name} = doc.addObject('Part::Cylinder', '{obj_name}')")
-            lines.append(f"{obj_name}.Label = '{obj_label}'")
-            lines.append(f"{obj_name}.Radius = {radius}")
-            lines.append(f"{obj_name}.Height = {height}")
-
-        elif obj_type == "Part::Sphere":
-            props = obj_data.get("properties", {})
-            radius = props.get("Radius", {}).get("value", 5)
-            lines.append(f"{obj_name} = doc.addObject('Part::Sphere', '{obj_name}')")
-            lines.append(f"{obj_name}.Label = '{obj_label}'")
-            lines.append(f"{obj_name}.Radius = {radius}")
-
-        elif obj_type == "Part::Cone":
-            props = obj_data.get("properties", {})
-            radius1 = props.get("Radius1", {}).get("value", 5)
-            radius2 = props.get("Radius2", {}).get("value", 0)
-            height = props.get("Height", {}).get("value", 10)
-            lines.append(f"{obj_name} = doc.addObject('Part::Cone', '{obj_name}')")
-            lines.append(f"{obj_name}.Label = '{obj_label}'")
-            lines.append(f"{obj_name}.Radius1 = {radius1}")
-            lines.append(f"{obj_name}.Radius2 = {radius2}")
-            lines.append(f"{obj_name}.Height = {height}")
-
-        elif obj_type == "Part::Feature":
-            # Generic Part::Feature - try to recreate from vertices or BREP
-            shape_data = obj_data.get("shape", {})
-            if shape_data.get("brep"):
-                lines.append(f"# Recreate {obj_label} from BREP")
-                lines.append(f"{obj_name}_shape = Part.Shape()")
-                lines.append(f"{obj_name}_shape.importBrepFromString('''{shape_data['brep']}''')")
-                lines.append(f"{obj_name} = doc.addObject('Part::Feature', '{obj_name}')")
-                lines.append(f"{obj_name}.Label = '{obj_label}'")
-                lines.append(f"{obj_name}.Shape = {obj_name}_shape")
-            elif shape_data.get("vertices"):
-                lines.append(f"# {obj_label} has {len(shape_data['vertices'])} vertices")
-                lines.append(f"# Vertices stored but complex shape reconstruction not implemented")
-                lines.append(f"# Use BREP data for exact reconstruction")
-            else:
-                lines.append(f"# {obj_label}: Complex Part::Feature - manual reconstruction needed")
-
-        elif "Sketcher" in obj_type:
-            sketch_data = obj_data.get("sketch_data", {})
-            lines.append(f"# Sketch {obj_label}: {sketch_data.get('geometry_count', 0)} geometries, {sketch_data.get('constraint_count', 0)} constraints")
-            lines.append(f"# Sketch reconstruction requires Sketcher module integration")
-
-        else:
-            lines.append(f"# {obj_label}: {obj_type} - type-specific reconstruction not implemented")
-
-        # Add placement if present
-        placement = obj_data.get("placement")
-        if placement:
-            pos = placement["position"]
-            rot = placement["rotation"]
-            lines.append(f"if hasattr({obj_name}, 'Placement'):")
-            lines.append(f"    {obj_name}.Placement.Base = FreeCAD.Vector({pos['x']}, {pos['y']}, {pos['z']})")
-            lines.append(f"    {obj_name}.Placement.Rotation = FreeCAD.Rotation(FreeCAD.Vector({rot['axis'][0]}, {rot['axis'][1]}, {rot['axis'][2]}), {rot['angle']})")
-
-        lines.append("")
-
-    lines.extend([
-        "# Recompute document",
-        "doc.recompute()",
-        "",
-        "print(f'Reconstructed {len(doc.Objects)} objects in {doc.Name}')",
-    ])
-
-    return "\n".join(lines)
-
-
 def capture_current_state(include_brep: bool = False) -> Optional[Dict]:
     """Capture current document state as dict for change detection.
 
@@ -486,95 +373,67 @@ def capture_current_state(include_brep: bool = False) -> Optional[Dict]:
     }
 
 
-def save_snapshot(timestamp: str = None, include_brep: bool = True) -> Optional[str]:
-    """Save a comprehensive snapshot of all document objects.
+def _get_next_counter(directory: Path, pattern: str = "*.json") -> int:
+    """Get the next counter number based on existing files.
+
+    Parses filenames like '001_...json' and returns max + 1.
 
     Args:
-        timestamp: Optional timestamp string for the filename (matches session ID).
+        directory: Directory to scan for existing files.
+        pattern: Glob pattern to match files.
+
+    Returns:
+        Next counter number (starts at 1).
+    """
+    max_counter = 0
+    for f in directory.glob(pattern):
+        name = f.stem
+        # Extract counter from start of filename (e.g., "001_2026-01-16")
+        if "_" in name:
+            try:
+                counter = int(name.split("_")[0])
+                max_counter = max(max_counter, counter)
+            except ValueError:
+                pass
+    return max_counter + 1
+
+
+def save_snapshot(include_brep: bool = True) -> tuple:
+    """Save a comprehensive snapshot of all document objects.
+
+    Uses counter-based naming: {counter:03d}_{date}_{time}.json
+    Example: 001_2026-01-16_16-57.json
+
+    Args:
         include_brep: Whether to include BREP data for exact geometry reconstruction.
 
     Returns:
-        Path to the saved JSON file, or None if failed.
+        Tuple of (snapshot_id, path) or (None, None) if failed.
+        snapshot_id is the filename without extension, used for session linking.
     """
     snapshot = capture_current_state(include_brep=include_brep)
     if not snapshot:
         FreeCAD.Console.PrintWarning("AIAssistant: No active document for snapshot\n")
-        return None
+        return (None, None)
 
     snapshots_dir = get_snapshots_dir()
     if not snapshots_dir:
         FreeCAD.Console.PrintWarning("AIAssistant: Could not determine snapshots directory\n")
-        return None
+        return (None, None)
 
-    if timestamp is None:
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    # Generate counter-based filename
+    counter = _get_next_counter(snapshots_dir)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    snapshot_id = f"{counter:03d}_{timestamp}"
 
     # Save JSON snapshot
-    json_path = snapshots_dir / f"{timestamp}.json"
+    json_path = snapshots_dir / f"{snapshot_id}.json"
     try:
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(snapshot, f, indent=2, ensure_ascii=False)
         FreeCAD.Console.PrintMessage(f"AIAssistant: Snapshot saved to {json_path}\n")
     except Exception as e:
         FreeCAD.Console.PrintError(f"AIAssistant: Failed to save snapshot JSON: {e}\n")
-        return None
+        return (None, None)
 
-    # Generate and save Python reconstruction script
-    py_path = snapshots_dir / f"{timestamp}_reconstruct.py"
-    try:
-        script = _generate_python_script(snapshot)
-        with open(py_path, "w", encoding="utf-8") as f:
-            f.write(script)
-        FreeCAD.Console.PrintMessage(f"AIAssistant: Reconstruction script saved to {py_path}\n")
-    except Exception as e:
-        FreeCAD.Console.PrintWarning(f"AIAssistant: Failed to save reconstruction script: {e}\n")
-
-    return str(json_path)
-
-
-def load_snapshot(snapshot_path: str) -> Optional[Dict]:
-    """Load a snapshot from a JSON file.
-
-    Args:
-        snapshot_path: Path to the snapshot JSON file.
-
-    Returns:
-        Snapshot dictionary, or None if failed.
-    """
-    try:
-        with open(snapshot_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        FreeCAD.Console.PrintError(f"AIAssistant: Failed to load snapshot: {e}\n")
-        return None
-
-
-def list_snapshots() -> List[Dict]:
-    """List all available snapshots.
-
-    Returns:
-        List of snapshot summaries with timestamp, object_count, etc.
-    """
-    snapshots_dir = get_snapshots_dir()
-    if not snapshots_dir:
-        return []
-
-    snapshots = []
-    for json_file in sorted(snapshots_dir.glob("*.json"), reverse=True):
-        # Skip non-snapshot files
-        if "_reconstruct" in json_file.name:
-            continue
-
-        try:
-            with open(json_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                snapshots.append({
-                    "path": str(json_file),
-                    "timestamp": data.get("timestamp", ""),
-                    "document_name": data.get("document", {}).get("name", ""),
-                    "object_count": data.get("object_count", 0),
-                })
-        except Exception:
-            continue
-
-    return snapshots
+    return (snapshot_id, str(json_path))

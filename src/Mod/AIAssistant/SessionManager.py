@@ -40,6 +40,31 @@ def get_global_sessions_dir() -> Path:
     return sessions_dir
 
 
+def _get_next_counter(directory: Path, pattern: str = "*.json") -> int:
+    """Get the next counter number based on existing files.
+
+    Parses filenames like '001_...json' and returns max + 1.
+
+    Args:
+        directory: Directory to scan for existing files.
+        pattern: Glob pattern to match files.
+
+    Returns:
+        Next counter number (starts at 1).
+    """
+    max_counter = 0
+    for f in directory.glob(pattern):
+        name = f.stem
+        # Extract counter from start of filename (e.g., "001_2026-01-16")
+        if "_" in name:
+            try:
+                counter = int(name.split("_")[0])
+                max_counter = max(max_counter, counter)
+            except ValueError:
+                pass
+    return max_counter + 1
+
+
 class SessionManager:
     """Manages chat session persistence to JSON files.
 
@@ -74,14 +99,21 @@ class SessionManager:
         """
         Create a new session.
 
+        Uses counter-based naming: {counter:03d}_{date}_{time}.json
+        Example: 001_2026-01-16_16-57.json
+
         Args:
             document_name: Optional FreeCAD document name to associate.
 
         Returns:
-            The new session ID (timestamp-based).
+            The new session ID (counter + timestamp based).
         """
         now = datetime.now()
-        session_id = now.strftime("%Y-%m-%d_%H-%M-%S")
+
+        # Generate counter-based session ID
+        counter = _get_next_counter(self._sessions_dir)
+        timestamp = now.strftime("%Y-%m-%d_%H-%M")
+        session_id = f"{counter:03d}_{timestamp}"
 
         # Get document filename if available
         document_filename = ""
@@ -100,7 +132,7 @@ class SessionManager:
             "document_filename": document_filename,
             "messages": [],
             "llm_requests": [],  # Debug: full LLM request/response data
-            "snapshots": []  # List of snapshot timestamps linked to this session
+            "snapshots": []  # List of snapshot IDs linked to this session
         }
 
         self._save_current_session()

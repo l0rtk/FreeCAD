@@ -476,14 +476,12 @@ class AIAssistantDockWidget(QtWidgets.QDockWidget):
             objects_filter = self._context_widget.get_context_objects()
             context = ContextBuilder.build_context(objects_filter=objects_filter)
 
-        # Capture object snapshot for future context enrichment (unique timestamp per request)
-        from datetime import datetime
-        snapshot_timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        snapshot_path = SnapshotManager.save_snapshot(timestamp=snapshot_timestamp)
+        # Capture object snapshot for future context enrichment
+        snapshot_id, snapshot_path = SnapshotManager.save_snapshot()
 
         # Link snapshot to session
-        if snapshot_path:
-            self.session_manager.add_snapshot_reference(snapshot_timestamp)
+        if snapshot_id:
+            self.session_manager.add_snapshot_reference(snapshot_id)
 
         # Get conversation history
         conversation = self._chat.get_conversation_history()
