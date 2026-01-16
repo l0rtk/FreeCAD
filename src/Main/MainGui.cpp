@@ -184,14 +184,14 @@ int main(int argc, char** argv)
 #endif
 
     // Name and Version of the Application
-    App::Application::Config()["ExeName"] = "FreeCAD";
+    App::Application::Config()["ExeName"] = "Buildable";
     App::Application::Config()["ExeVendor"] = "FreeCAD";
     App::Application::Config()["AppDataSkipVendor"] = "true";
     App::Application::Config()["MaintainerUrl"] = "https://freecad.org";
 
     // set the banner (for logging and console)
     App::Application::Config()["CopyrightInfo"] = sBanner;
-    App::Application::Config()["AppIcon"] = "freecad";
+    App::Application::Config()["AppIcon"] = "buildable";
     App::Application::Config()["SplashScreen"] = "freecadsplash";
     App::Application::Config()["AboutImage"] = App::Application::isDevelopmentVersion()
         ? "freecadaboutdev"

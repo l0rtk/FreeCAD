@@ -115,6 +115,8 @@ def _build_namespace() -> dict:
         "FreeCADGui": FreeCADGui,
         "App": FreeCAD,
         "Gui": FreeCADGui,
+        # Provide 'doc' for convenience - matches sandbox preview environment
+        "doc": FreeCAD.ActiveDocument,
     }
 
     # Import common modules
@@ -144,6 +146,13 @@ def _build_namespace() -> dict:
     try:
         from BIM import ArchPrecast
         namespace["ArchPrecast"] = ArchPrecast
+    except ImportError:
+        pass
+
+    # Add PartsLibrary for inserting standard parts
+    try:
+        from . import PartsLibrary
+        namespace["PartsLibrary"] = PartsLibrary
     except ImportError:
         pass
 

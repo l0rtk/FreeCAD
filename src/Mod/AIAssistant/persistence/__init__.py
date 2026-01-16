@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+"""Session and logging persistence for AI Assistant."""
+
+from .session import SessionManager, get_project_sessions_dir, get_global_sessions_dir
+from .activity import (
+    get_log_path,
+    log,
+    log_message_sent,
+    log_response_received,
+    log_tool_calls,
+    log_llm_response,
+    log_preview_created,
+    log_preview_approved,
+    log_preview_cancelled,
+    log_plan_approved,
+    log_plan_edited,
+    log_plan_cancelled,
+    log_code_executed,
+    log_session_created,
+    log_session_loaded,
+    log_session_cleared,
+    log_snapshot_saved,
+    log_setting_changed,
+    log_source_edited,
+    log_source_restored,
+    log_error,
+    log_panel_opened,
+    log_panel_closed,
+)
+
+__all__ = [
+    # session
+    "SessionManager",
+    "get_project_sessions_dir",
+    "get_global_sessions_dir",
+    # activity
+    "get_log_path",
+    "log",
+    "log_message_sent",
+    "log_response_received",
+    "log_tool_calls",
+    "log_llm_response",
+    "log_preview_created",
+    "log_preview_approved",
+    "log_preview_cancelled",
+    "log_plan_approved",
+    "log_plan_edited",
+    "log_plan_cancelled",
+    "log_code_executed",
+    "log_session_created",
+    "log_session_loaded",
+    "log_session_cleared",
+    "log_snapshot_saved",
+    "log_setting_changed",
+    "log_source_edited",
+    "log_source_restored",
+    "log_error",
+    "log_panel_opened",
+    "log_panel_closed",
+]

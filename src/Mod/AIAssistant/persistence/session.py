@@ -1,0 +1,395 @@
+# SPDX-License-Identifier: LGPL-2.1-or-later
+"""
+Session Manager - Persists chat sessions and debug data to local JSON files.
+Sessions are stored in a project subfolder: {doc_stem}/.freecad_ai/sessions/
+"""
+
+import json
+import os
+import time
+from datetime import datetime
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+
+import FreeCAD
+
+
+def get_project_sessions_dir() -> Optional[Path]:
+    """Get sessions directory for the active document.
+
+    Uses project subfolder: {doc_stem}/sessions/
+    """
+    try:
+        doc = FreeCAD.ActiveDocument
+        if doc and doc.FileName:
+            doc_path = Path(doc.FileName)
+            # Create project subfolder: parent/doc_stem/sessions/
+            sessions_dir = doc_path.parent / doc_path.stem / "sessions"
+            sessions_dir.mkdir(parents=True, exist_ok=True)
+            return sessions_dir
+    except Exception:
+        pass
+    return None
+
+
+def get_global_sessions_dir() -> Path:
+    """Get the global sessions directory (fallback)."""
+    config_dir = Path(FreeCAD.getUserAppDataDir())
+    sessions_dir = config_dir / "AIAssistant" / "sessions"
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+    return sessions_dir
+
+
+def _get_next_counter(directory: Path, pattern: str = "*.json") -> int:
+    """Get the next counter number based on existing files.
+
+    Parses filenames like '001_...json' and returns max + 1.
+
+    Args:
+        directory: Directory to scan for existing files.
+        pattern: Glob pattern to match files.
+
+    Returns:
+        Next counter number (starts at 1).
+    """
+    max_counter = 0
+    for f in directory.glob(pattern):
+        name = f.stem
+        # Extract counter from start of filename (e.g., "001_2026-01-16")
+        if "_" in name:
+            try:
+                counter = int(name.split("_")[0])
+                max_counter = max(max_counter, counter)
+            except ValueError:
+                pass
+    return max_counter + 1
+
+
+class SessionManager:
+    """Manages chat session persistence to JSON files.
+
+    Sessions are stored in project subfolder: {doc_stem}/.freecad_ai/sessions/
+    Falls back to global location if document is not saved.
+    """
+
+    def __init__(self, sessions_dir: str = None):
+        """
+        Initialize the session manager.
+
+        Args:
+            sessions_dir: Optional custom directory for sessions.
+        """
+        self._custom_dir = Path(sessions_dir) if sessions_dir else None
+        self._current_session_id: Optional[str] = None
+        self._current_session_data: Optional[dict] = None
+
+    @property
+    def _sessions_dir(self) -> Path:
+        """Get the appropriate sessions directory."""
+        if self._custom_dir:
+            self._custom_dir.mkdir(parents=True, exist_ok=True)
+            return self._custom_dir
+        # Try project-level first, fall back to global
+        project_dir = get_project_sessions_dir()
+        if project_dir:
+            return project_dir
+        return get_global_sessions_dir()
+
+    def new_session(self) -> str:
+        """
+        Create a new session.
+
+        Uses counter-based naming: {counter:03d}_{date}_{time}.json
+        Example: 001_2026-01-16_16-57.json
+
+        Returns:
+            The new session ID (counter + timestamp based).
+        """
+        now = datetime.now()
+
+        # Generate counter-based session ID
+        counter = _get_next_counter(self._sessions_dir)
+        timestamp = now.strftime("%Y-%m-%d_%H-%M")
+        session_id = f"{counter:03d}_{timestamp}"
+
+        # Get document filename
+        document_filename = ""
+        try:
+            if FreeCAD.ActiveDocument and FreeCAD.ActiveDocument.FileName:
+                document_filename = FreeCAD.ActiveDocument.FileName
+        except Exception:
+            pass
+
+        self._current_session_id = session_id
+        self._current_session_data = {
+            "session_id": session_id,
+            "created": now.isoformat(),
+            "updated": now.isoformat(),
+            "document_filename": document_filename,
+            "messages": [],
+            "llm_requests": [],  # Debug: full LLM request/response data
+            "snapshots": []  # List of snapshot IDs linked to this session
+        }
+
+        self._save_current_session()
+        return session_id
+
+    def save_message(self, message) -> None:
+        """
+        Save a message to the current session.
+
+        Args:
+            message: ChatMessage object to save.
+        """
+        # Auto-create session if none exists
+        if self._current_session_id is None:
+            self.new_session()
+
+        # Convert message to dict
+        message_dict = {
+            "timestamp": message.timestamp.isoformat(),
+            "role": message.role,
+            "text": message.text,
+            "code_blocks": [
+                {
+                    "language": cb.language,
+                    "code": cb.code,
+                    "start_pos": cb.start_pos,
+                    "end_pos": cb.end_pos
+                }
+                for cb in message.code_blocks
+            ]
+        }
+
+        # Include change visualization data if present
+        if hasattr(message, 'changes') and message.changes:
+            message_dict["changes"] = message.changes
+
+        # Append to current session
+        self._current_session_data["messages"].append(message_dict)
+        self._current_session_data["updated"] = datetime.now().isoformat()
+
+        self._save_current_session()
+
+    def log_llm_request(
+        self,
+        user_message: str,
+        system_prompt: str,
+        context: str,
+        conversation_history: List[dict],
+        response: str,
+        model: str = "",
+        api_url: str = "",
+        duration_ms: float = 0,
+        success: bool = True,
+        error: str = "",
+        tool_calls: List[dict] = None,
+        cost_usd: float = 0
+    ) -> None:
+        """
+        Log a complete LLM request/response for debugging.
+
+        Args:
+            user_message: The user's input message
+            system_prompt: Full system prompt sent to LLM
+            context: Document context string
+            conversation_history: Previous messages sent for context
+            response: LLM response (or error message)
+            model: Model name used
+            api_url: API endpoint URL
+            duration_ms: Request duration in milliseconds
+            success: Whether the request succeeded
+            error: Error message if failed
+            tool_calls: List of tool calls made (Read, Edit, Glob, Grep)
+            cost_usd: Cost in USD for this request
+        """
+        # Auto-create session if none exists
+        if self._current_session_id is None:
+            self.new_session()
+
+        # Build debug entry
+        debug_entry = {
+            "timestamp": datetime.now().isoformat(),
+            "request": {
+                "user_message": user_message,
+                "system_prompt": system_prompt,
+                "context": context,
+                "conversation_history": conversation_history,
+                "model": model,
+                "api_url": api_url
+            },
+            "response": {
+                "content": response,
+                "success": success,
+                "error": error,
+                "duration_ms": duration_ms,
+                "cost_usd": cost_usd
+            },
+            "tool_calls": tool_calls or []
+        }
+
+        # Ensure llm_requests exists (for older sessions)
+        if "llm_requests" not in self._current_session_data:
+            self._current_session_data["llm_requests"] = []
+
+        self._current_session_data["llm_requests"].append(debug_entry)
+        self._current_session_data["updated"] = datetime.now().isoformat()
+
+        self._save_current_session()
+
+    def load_session(self, session_id: str) -> List[dict]:
+        """
+        Load messages from a session file.
+
+        Args:
+            session_id: The session ID to load.
+
+        Returns:
+            List of message dictionaries.
+        """
+        session_path = self._sessions_dir / f"{session_id}.json"
+
+        if not session_path.exists():
+            return []
+
+        try:
+            with open(session_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                self._current_session_id = session_id
+                self._current_session_data = data
+
+                messages = data.get("messages", [])
+                llm_requests = data.get("llm_requests", [])
+
+                FreeCAD.Console.PrintMessage(f"AIAssistant: load_session - {len(messages)} messages, {len(llm_requests)} llm_requests\n")
+
+                # Match assistant messages with their debug info from llm_requests
+                llm_request_idx = 0
+                debug_attached = 0
+                for msg in messages:
+                    if msg.get("role") == "assistant" and llm_request_idx < len(llm_requests):
+                        req = llm_requests[llm_request_idx]
+                        msg["debug_info"] = {
+                            "duration_ms": req.get("response", {}).get("duration_ms", 0),
+                            "cost_usd": req.get("response", {}).get("cost_usd", 0),
+                            "model": req.get("request", {}).get("model", "unknown"),
+                            "context_length": len(req.get("request", {}).get("context", "")),
+                            "system_prompt": req.get("request", {}).get("system_prompt", ""),
+                            "context": req.get("request", {}).get("context", ""),
+                            "conversation_history": req.get("request", {}).get("conversation_history", []),
+                            "user_message": req.get("request", {}).get("user_message", ""),
+                            "tool_calls": req.get("tool_calls", []),
+                        }
+                        llm_request_idx += 1
+                        debug_attached += 1
+
+                FreeCAD.Console.PrintMessage(f"AIAssistant: load_session - attached debug_info to {debug_attached} assistant messages\n")
+                return messages
+        except Exception as e:
+            FreeCAD.Console.PrintError(f"AIAssistant: Failed to load session: {e}\n")
+            return []
+
+    def list_sessions(self) -> List[dict]:
+        """
+        List all available sessions.
+
+        Returns:
+            List of session summaries: {session_id, created, message_count, document_filename, preview}
+        """
+        sessions = []
+
+        for session_file in sorted(self._sessions_dir.glob("*.json"), reverse=True):
+            try:
+                with open(session_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    sessions.append({
+                        "session_id": data.get("session_id", session_file.stem),
+                        "created": data.get("created", ""),
+                        "updated": data.get("updated", ""),
+                        "message_count": len(data.get("messages", [])),
+                        "document_filename": data.get("document_filename", ""),
+                        "preview": self._get_preview(data.get("messages", []))
+                    })
+            except Exception:
+                # Skip corrupted files
+                continue
+
+        return sessions
+
+    def get_current_session_id(self) -> Optional[str]:
+        """Get the current active session ID."""
+        return self._current_session_id
+
+    def add_snapshot_reference(self, snapshot_timestamp: str) -> None:
+        """
+        Add a snapshot reference to the current session.
+
+        Args:
+            snapshot_timestamp: The timestamp of the snapshot to link.
+        """
+        if self._current_session_id is None:
+            return
+
+        # Ensure snapshots list exists (for older sessions)
+        if "snapshots" not in self._current_session_data:
+            self._current_session_data["snapshots"] = []
+
+        self._current_session_data["snapshots"].append(snapshot_timestamp)
+        self._current_session_data["updated"] = datetime.now().isoformat()
+
+        self._save_current_session()
+
+    def delete_session(self, session_id: str) -> bool:
+        """
+        Delete a session file.
+
+        Args:
+            session_id: The session ID to delete.
+
+        Returns:
+            True if deleted successfully.
+        """
+        session_path = self._sessions_dir / f"{session_id}.json"
+
+        try:
+            if session_path.exists():
+                session_path.unlink()
+
+                # Clear current session if it was deleted
+                if self._current_session_id == session_id:
+                    self._current_session_id = None
+                    self._current_session_data = None
+
+                return True
+        except Exception as e:
+            FreeCAD.Console.PrintError(f"AIAssistant: Failed to delete session: {e}\n")
+
+        return False
+
+    def clear_current_session(self) -> None:
+        """Clear the current session (start fresh)."""
+        self._current_session_id = None
+        self._current_session_data = None
+
+    def _save_current_session(self) -> None:
+        """Save current session data to disk."""
+        if not self._current_session_id or not self._current_session_data:
+            return
+
+        session_path = self._sessions_dir / f"{self._current_session_id}.json"
+
+        try:
+            with open(session_path, "w", encoding="utf-8") as f:
+                json.dump(self._current_session_data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            FreeCAD.Console.PrintError(f"AIAssistant: Failed to save session: {e}\n")
+
+    def _get_preview(self, messages: List[dict], max_length: int = 50) -> str:
+        """Get a preview of the first user message."""
+        for msg in messages:
+            if msg.get("role") == "user":
+                text = msg.get("text", "")
+                if len(text) > max_length:
+                    return text[:max_length] + "..."
+                return text
+        return ""
