@@ -24,6 +24,11 @@ SET(AIAssistant_SRCS
     PartsLibrary.py
     SourceManager.py
     Theme.py
+    PlanWidget.py
+    StepPreviewWidget.py
+    ContextSelectionWidget.py
+    ActivityWidget.py
+    LLMBackend.py
     project_claude_template.md
 )
 
