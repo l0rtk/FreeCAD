@@ -275,14 +275,6 @@ class ClaudeCodeBackend:
             FreeCAD.Console.PrintError(f"AIAssistant: Claude Code error: {e}\n")
             return f"# Error: {e}"
 
-        finally:
-            # Clean up screenshot temp file
-            if screenshot_path:
-                try:
-                    os.unlink(screenshot_path)
-                except Exception:
-                    pass
-
     def _build_prompt(self, message: str, context: str, screenshot_path: str = None) -> str:
         """Build the prompt for Claude Code.
 
@@ -317,23 +309,51 @@ class ClaudeCodeBackend:
         return "\n".join(parts)
 
     def _save_screenshot(self, base64_data: str) -> str:
-        """Save base64 screenshot to temp file for Claude to read.
+        """Save base64 screenshot to project directory for Claude to read.
+
+        Screenshots are saved to {project_dir}/screenshots/ with timestamps.
+        They are kept for debugging/logging purposes (not deleted after use).
 
         Args:
             base64_data: Base64-encoded PNG image
 
         Returns:
-            Path to temporary file
+            Path to saved screenshot file
         """
         import base64
-        import tempfile
+        from datetime import datetime
+
+        if not self.project_dir:
+            FreeCAD.Console.PrintWarning("AIAssistant: No project dir, cannot save screenshot\n")
+            return None
 
         try:
+            # Create screenshots directory
+            screenshots_dir = Path(self.project_dir) / "screenshots"
+            screenshots_dir.mkdir(parents=True, exist_ok=True)
+
+            # Find next counter (like snapshots: 001, 002, etc.)
+            existing = list(screenshots_dir.glob("*.png"))
+            max_num = 0
+            for f in existing:
+                try:
+                    num = int(f.stem.split("_")[0])
+                    max_num = max(max_num, num)
+                except (ValueError, IndexError):
+                    pass
+            next_num = max_num + 1
+
+            # Generate filename: 001_2026-01-16_22-05.png
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+            filename = f"{next_num:03d}_{timestamp}.png"
+            path = screenshots_dir / filename
+
+            # Decode and save
             image_data = base64.b64decode(base64_data)
-            fd, path = tempfile.mkstemp(suffix=".png", prefix="freecad_viewport_")
-            os.write(fd, image_data)
-            os.close(fd)
-            return path
+            path.write_bytes(image_data)
+
+            FreeCAD.Console.PrintMessage(f"AIAssistant: Screenshot saved to {path}\n")
+            return str(path)
         except Exception as e:
             FreeCAD.Console.PrintWarning(f"AIAssistant: Failed to save screenshot: {e}\n")
             return None

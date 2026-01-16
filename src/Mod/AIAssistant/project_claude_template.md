@@ -32,4 +32,5 @@ Return a clear text explanation.
 - **source.py** - The design expressed as Python code (edit this directly)
 - **activity.ndjson** - NDJSON log of all interactions (one JSON object per line)
 - **snapshots/** - JSON snapshots of document state (objects, geometry)
+- **screenshots/** - Viewport images sent with each message
 - **sessions/** - Conversation history and LLM debug data
