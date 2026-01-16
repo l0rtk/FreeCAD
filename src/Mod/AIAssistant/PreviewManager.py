@@ -49,6 +49,9 @@ class PreviewManager:
         self._deletion_targets: List[str] = []  # Object names to be deleted
         self._deletion_originals: Dict[str, Dict] = {}  # Original appearance to restore
 
+        # Modification preview state (same name, different geometry)
+        self._modified_names: List[str] = []  # Object names being modified
+
     def create_preview(self, code: str) -> tuple:
         """Create preview - route to deletion or creation path.
 
@@ -348,6 +351,7 @@ class PreviewManager:
         if not doc:
             self._deletion_originals = {}
             self._deletion_targets = []
+            self._modified_names = []
             return
 
         for name, original in self._deletion_originals.items():
@@ -363,6 +367,7 @@ class PreviewManager:
 
         self._deletion_originals = {}
         self._deletion_targets = []
+        self._modified_names = []
         self._is_deletion = False
 
     def approve(self) -> str:
@@ -464,12 +469,61 @@ class PreviewManager:
     # Direct Source Editing - Diff Preview
     # =========================================================================
 
+    def _shapes_equal(self, shape1, shape2) -> bool:
+        """Compare two shapes for equality.
+
+        Uses volume and bounding box as a fast heuristic. Two shapes are
+        considered equal if they have the same volume (within tolerance)
+        and the same bounding box dimensions.
+
+        Args:
+            shape1: First Part.Shape
+            shape2: Second Part.Shape
+
+        Returns:
+            True if shapes appear to be identical
+        """
+        if shape1 is None or shape2 is None:
+            return shape1 is shape2
+
+        if shape1.isNull() or shape2.isNull():
+            return shape1.isNull() and shape2.isNull()
+
+        # Compare volume (with tolerance for floating point)
+        vol1 = shape1.Volume
+        vol2 = shape2.Volume
+        vol_tolerance = max(abs(vol1), abs(vol2)) * 1e-6 + 1e-9
+        if abs(vol1 - vol2) > vol_tolerance:
+            return False
+
+        # Compare bounding box dimensions
+        bb1 = shape1.BoundBox
+        bb2 = shape2.BoundBox
+
+        dim_tolerance = 1e-6
+        if (abs(bb1.XLength - bb2.XLength) > dim_tolerance or
+            abs(bb1.YLength - bb2.YLength) > dim_tolerance or
+            abs(bb1.ZLength - bb2.ZLength) > dim_tolerance):
+            return False
+
+        # Compare bounding box position (center)
+        center1 = bb1.Center
+        center2 = bb2.Center
+        pos_tolerance = 1e-6
+        if (abs(center1.x - center2.x) > pos_tolerance or
+            abs(center1.y - center2.y) > pos_tolerance or
+            abs(center1.z - center2.z) > pos_tolerance):
+            return False
+
+        return True
+
     def create_diff_preview(self, old_source: str, new_source: str) -> tuple:
         """Create preview showing diff between old and new source.py.
 
         Executes both versions in sandbox, compares resulting objects:
         - Objects in OLD but not NEW = deleted (red highlight in main doc)
         - Objects in NEW but not OLD = created (green preview)
+        - Objects in BOTH but with different geometry = modified (red old + green new)
 
         Used for direct source editing flow where Claude edits source.py.
 
@@ -513,10 +567,23 @@ class PreviewManager:
             # Compute diff
             deleted_names = old_objects - new_objects  # Objects removed
             created_names = new_objects - old_objects  # Objects added
+            common_names = old_objects & new_objects   # Objects in both
+
+            # Detect modifications: same name but different geometry
+            modified_names = set()
+            for name in common_names:
+                old_shape = old_shapes.get(name)
+                new_shape = new_shapes.get(name)
+                if not self._shapes_equal(old_shape, new_shape):
+                    modified_names.add(name)
+
+            # Store for later access
+            self._modified_names = list(modified_names)
 
             FreeCAD.Console.PrintMessage(
                 f"AIAssistant: Diff - {len(deleted_names)} deleted ({list(deleted_names)}), "
-                f"{len(created_names)} created ({list(created_names)})\n"
+                f"{len(created_names)} created ({list(created_names)}), "
+                f"{len(modified_names)} modified ({list(modified_names)})\n"
             )
 
             # Show deleted objects as red highlight in main doc
@@ -546,7 +613,34 @@ class PreviewManager:
                     if shape and not shape.isNull():
                         self._add_preview_shape_direct(main_doc, obj_name, shape)
 
-            self._is_deletion = len(deleted_names) > 0
+            # Show modified objects: red highlight on old (in main doc) + green preview of new
+            for obj_name in modified_names:
+                # Highlight old shape in red (will be replaced)
+                obj = main_doc.getObject(obj_name)
+                if obj and hasattr(obj, 'ViewObject') and obj.ViewObject:
+                    vo = obj.ViewObject
+                    # Store original appearance
+                    self._deletion_originals[obj_name] = {
+                        'color': vo.ShapeColor if hasattr(vo, 'ShapeColor') else None,
+                        'transparency': vo.Transparency if hasattr(vo, 'Transparency') else None,
+                        'line_color': vo.LineColor if hasattr(vo, 'LineColor') else None,
+                    }
+                    # Apply red highlight (being replaced)
+                    if hasattr(vo, 'ShapeColor'):
+                        vo.ShapeColor = DELETION_COLOR
+                    if hasattr(vo, 'Transparency'):
+                        vo.Transparency = DELETION_TRANSPARENCY
+                    if hasattr(vo, 'LineColor'):
+                        vo.LineColor = (0.7, 0.1, 0.1)
+                    self._deletion_targets.append(obj_name)
+
+                # Show new shape as green preview
+                if obj_name in new_shapes:
+                    new_shape = new_shapes[obj_name]
+                    if new_shape and not new_shape.isNull():
+                        self._add_preview_shape_direct(main_doc, obj_name, new_shape)
+
+            self._is_deletion = len(deleted_names) > 0 or len(modified_names) > 0
 
             main_doc.recompute()
 
@@ -557,11 +651,11 @@ class PreviewManager:
             except Exception:
                 pass
 
-            total_changes = len(deleted_names) + len(created_names)
+            total_changes = len(deleted_names) + len(created_names) + len(modified_names)
             if total_changes > 0:
                 FreeCAD.Console.PrintMessage(
                     f"AIAssistant: Created diff preview ({len(deleted_names)} deleted, "
-                    f"{len(created_names)} created)\n"
+                    f"{len(created_names)} created, {len(modified_names)} modified)\n"
                 )
                 return (True, "")
             else:
@@ -680,6 +774,14 @@ class PreviewManager:
     def is_deletion_preview(self) -> bool:
         """Check if current preview is a deletion preview."""
         return self._is_deletion
+
+    def is_modification_preview(self) -> bool:
+        """Check if current preview includes modifications (same name, different geometry)."""
+        return len(self._modified_names) > 0
+
+    def get_modified_names(self) -> List[str]:
+        """Get list of object names being modified."""
+        return self._modified_names.copy()
 
     def get_pending_code(self) -> str:
         """Get the pending code for the current preview."""
