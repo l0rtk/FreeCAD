@@ -7,7 +7,7 @@ Part of the two-phase LLM flow: plan → approve → code → preview → execut
 import re
 from PySide6 import QtCore, QtWidgets, QtGui
 from typing import List, Dict, Optional
-from . import Theme
+from .. import Theme
 
 
 class PlanStep:

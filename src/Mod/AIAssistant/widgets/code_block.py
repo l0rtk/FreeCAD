@@ -5,8 +5,8 @@ Cursor-inspired dark theme with blue accent.
 """
 
 from PySide6 import QtWidgets, QtCore, QtGui
-from .SyntaxHighlighter import PythonHighlighter
-from . import Theme
+from .syntax import PythonHighlighter
+from .. import Theme
 
 
 class CodeBlockWidget(QtWidgets.QFrame):

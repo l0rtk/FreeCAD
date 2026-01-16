@@ -6,7 +6,7 @@ Displays what tools (Glob, Read, Grep) Claude used during a request.
 
 from PySide6 import QtCore, QtWidgets
 from typing import List, Dict
-from . import Theme
+from .. import Theme
 
 
 # Tool icons for display (emoji)

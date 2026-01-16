@@ -7,9 +7,9 @@ Provides detailed information about all objects to help AI understand existing d
 import FreeCAD
 import FreeCADGui
 from collections import deque
-from . import SnapshotManager
-from . import SourceManager
-from . import PartsLibrary
+from . import snapshot as SnapshotManager
+from . import source as SourceManager
+from ..integration import parts_library as PartsLibrary
 import os
 
 

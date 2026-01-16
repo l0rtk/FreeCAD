@@ -8,7 +8,7 @@ import FreeCAD
 import FreeCADGui
 from PySide6 import QtCore, QtWidgets, QtGui
 from typing import List, Optional, Set
-from . import Theme
+from .. import Theme
 
 
 class ContextMode:

@@ -5,9 +5,9 @@ Cursor-inspired design with clean cards, no avatars, and skeleton loading.
 """
 
 from PySide6 import QtWidgets, QtCore, QtGui
-from .MessageModel import ChatMessage, MessageRole
-from .CodeBlockWidget import CodeBlockWidget
-from . import Theme
+from .message_model import ChatMessage, MessageRole
+from .code_block import CodeBlockWidget
+from .. import Theme
 import re
 
 

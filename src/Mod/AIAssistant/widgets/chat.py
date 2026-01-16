@@ -9,14 +9,14 @@ FreeCAD.Console.PrintMessage("AIAssistant: ChatWidget.py loaded (v3 modern desig
 
 from typing import Union, List, Dict
 from PySide6 import QtWidgets, QtCore, QtGui
-from .MessageModel import ChatMessageModel, ChatMessage, MessageRole
-from .MessageDelegate import MessageCard, ThinkingIndicator
-from .ChangeDetector import ChangeSet
-from .ChangeWidget import ChangeWidget
-from .PreviewWidget import PreviewWidget
-from .PlanWidget import PlanWidget
-from .ActivityWidget import ActivityWidget
-from . import Theme
+from .message_model import ChatMessageModel, ChatMessage, MessageRole
+from .message_delegate import MessageCard, ThinkingIndicator
+from ..core.changes import ChangeSet
+from .change import ChangeWidget
+from .preview import PreviewWidget
+from .plan import PlanWidget
+from .activity import ActivityWidget
+from .. import Theme
 
 
 class ChatListWidget(QtWidgets.QScrollArea):

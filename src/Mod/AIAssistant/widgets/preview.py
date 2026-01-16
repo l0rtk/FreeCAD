@@ -6,7 +6,7 @@ Cursor-inspired design with blue accent for creation, red for deletion.
 
 from PySide6 import QtCore, QtWidgets, QtGui
 from typing import List, Dict
-from . import Theme
+from .. import Theme
 
 # Deletion mode colors
 DELETION_ACCENT = "#ef4444"  # Red-500

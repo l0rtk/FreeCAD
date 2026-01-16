@@ -6,8 +6,8 @@ Shows created (green), modified (blue), and deleted (red) objects.
 
 from PySide6 import QtWidgets, QtCore, QtGui
 from typing import Dict, List, Optional, Union
-from .ChangeDetector import ChangeSet, ObjectChange
-from . import Theme
+from ..core.changes import ChangeSet, ObjectChange
+from .. import Theme
 
 
 # Color palette for change types

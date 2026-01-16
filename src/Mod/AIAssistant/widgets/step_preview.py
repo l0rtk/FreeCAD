@@ -6,7 +6,7 @@ Shows step description, objects affected, and preview button.
 
 from PySide6 import QtCore, QtWidgets, QtGui
 from typing import List, Dict, Optional
-from . import Theme
+from .. import Theme
 
 
 class StepState:

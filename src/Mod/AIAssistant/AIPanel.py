@@ -15,18 +15,18 @@ FreeCAD.Console.PrintMessage("AIAssistant: AIPanel.py loaded (v3 modern design)\
 
 from pathlib import Path
 
-from . import ClaudeCodeBackend
-from . import ContextBuilder
-from . import CodeExecutor
-from . import SnapshotManager
-from . import ChangeDetector
-from . import SourceManager
 from . import Theme
-from . import ActivityLogger
-from .ChatWidget import ChatWidget
-from .SessionManager import SessionManager
-from .PreviewManager import PreviewManager
-from .ContextSelectionWidget import ContextSelectionWidget
+from .backends import claude_code as ClaudeCodeBackend
+from .core import context as ContextBuilder
+from .core import executor as CodeExecutor
+from .core import snapshot as SnapshotManager
+from .core import changes as ChangeDetector
+from .core import source as SourceManager
+from .core.preview import PreviewManager
+from .persistence import activity as ActivityLogger
+from .persistence.session import SessionManager
+from .widgets.chat import ChatWidget
+from .widgets.context_selection import ContextSelectionWidget
 
 
 # Maximum attempts to auto-fix code that fails preview
