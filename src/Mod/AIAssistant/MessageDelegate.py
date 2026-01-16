@@ -62,11 +62,13 @@ class DebugInfoWidget(QtWidgets.QWidget):
 
         # Stats
         duration = self._debug_info.get('duration_ms', 0)
+        cost = self._debug_info.get('cost_usd', 0)
         model = self._debug_info.get('model', 'unknown')
         context_len = self._debug_info.get('context_length', 0)
         history_len = len(self._debug_info.get('conversation_history', []))
+        tool_count = len(self._debug_info.get('tool_calls', []))
 
-        stats_text = f"{duration:.0f}ms  ·  {model}  ·  {context_len} chars  ·  {history_len} msgs"
+        stats_text = f"{duration:.0f}ms  ·  ${cost:.4f}  ·  {model}  ·  {context_len} chars  ·  {tool_count} tools"
         stats_label = QtWidgets.QLabel(stats_text)
         stats_label.setStyleSheet(f"""
             QLabel {{
@@ -84,8 +86,8 @@ class DebugInfoWidget(QtWidgets.QWidget):
 
         for btn_text, btn_handler in [
             ("Full Request", self._show_full_request),
-            ("System Prompt", lambda: self._show_text("System Prompt", self._debug_info.get("system_prompt", ""))),
             ("Context", lambda: self._show_text("Document Context", self._debug_info.get("context", ""))),
+            ("Tool Calls", self._show_tool_calls),
         ]:
             btn = QtWidgets.QPushButton(btn_text)
             btn.setCursor(QtCore.Qt.PointingHandCursor)
@@ -141,7 +143,53 @@ class DebugInfoWidget(QtWidgets.QWidget):
         lines.append("-" * 60)
         lines.append(self._debug_info.get('system_prompt', '(none)'))
 
+        # Tool calls
+        tool_calls = self._debug_info.get('tool_calls', [])
+        if tool_calls:
+            lines.append("")
+            lines.append("-" * 60)
+            lines.append(f"TOOL CALLS ({len(tool_calls)}):")
+            lines.append("-" * 60)
+            for i, tc in enumerate(tool_calls):
+                tool_name = tc.get('tool', 'unknown')
+                tool_input = tc.get('input', {})
+                lines.append(f"\n[{i+1}] {tool_name}")
+                for key, value in tool_input.items():
+                    val_str = str(value)
+                    if len(val_str) > 200:
+                        val_str = val_str[:200] + "..."
+                    lines.append(f"    {key}: {val_str}")
+
         self._show_text("Full LLM Request", "\n".join(lines))
+
+    def _show_tool_calls(self):
+        """Show tool calls made during this request."""
+        import json
+        tool_calls = self._debug_info.get('tool_calls', [])
+
+        if not tool_calls:
+            self._show_text("Tool Calls", "(No tool calls made)")
+            return
+
+        lines = []
+        lines.append(f"Tool Calls: {len(tool_calls)}")
+        lines.append("=" * 60)
+
+        for i, tc in enumerate(tool_calls):
+            tool_name = tc.get('tool', 'unknown')
+            tool_input = tc.get('input', {})
+
+            lines.append(f"\n[{i+1}] {tool_name}")
+            lines.append("-" * 40)
+
+            # Pretty print the input
+            try:
+                formatted = json.dumps(tool_input, indent=2)
+                lines.append(formatted)
+            except Exception:
+                lines.append(str(tool_input))
+
+        self._show_text("Tool Calls", "\n".join(lines))
 
     def _show_text(self, title: str, text: str):
         """Show full text in a dialog."""
