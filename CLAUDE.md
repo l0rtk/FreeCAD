@@ -151,21 +151,43 @@ Read source.py         Edit source.py
 - **Reproducible** - Run `source.py` on any machine to recreate the design
 - **Context-aware** - Claude sees the actual code, not just object properties
 
-#### Core Components
+#### Module Structure
 
-| File | Purpose |
-|------|---------|
-| `ClaudeCodeBackend.py` | Spawns `claude` CLI, allows Read/Edit tools for source.py |
-| `SourceManager.py` | Manages source.py lifecycle, backup/restore for cancel |
-| `AIPanel.py` | Main dock widget, orchestrates requests and UI |
-| `ChatWidget.py` | Chat message display |
-| `PreviewManager.py` | Executes source.py, shows preview before commit |
-| `SessionManager.py` | Persists chat sessions and LLM debug data to JSON |
-| `SnapshotManager.py` | Captures document state (objects, shapes, properties) to JSON |
-| `ActivityLogger.py` | Logs all user interactions and events to activity.log |
-| `Theme.py` | Cursor-inspired dark theme styling |
+```
+AIAssistant/
+├── AIPanel.py                 # Main dock widget, orchestrates UI and requests
+├── Theme.py                   # Cursor-inspired dark theme styling
+│
+├── backends/                  # LLM communication
+│   ├── claude_code.py         # Spawns `claude` CLI, allows Read/Edit tools
+│   └── http.py                # Legacy HTTP API backend
+│
+├── core/                      # Business logic
+│   ├── context.py             # Builds document context for LLM
+│   ├── source.py              # Manages source.py lifecycle, backup/restore
+│   ├── snapshot.py            # Captures document state to JSON
+│   ├── changes.py             # Detects changes between snapshots
+│   ├── executor.py            # Safely executes AI-generated Python
+│   └── preview.py             # Shows preview before commit
+│
+├── persistence/               # Data storage
+│   ├── session.py             # Persists chat sessions and LLM debug data
+│   └── activity.py            # Logs events to activity.ndjson
+│
+├── widgets/                   # Qt UI components
+│   ├── chat.py                # Chat message display
+│   ├── message_model.py       # Data model for messages
+│   ├── message_delegate.py    # Message card rendering
+│   ├── change.py              # Change visualization widget
+│   ├── preview.py             # Preview approval widget
+│   ├── plan.py                # Plan approval widget
+│   └── ...                    # Other UI widgets
+│
+└── integration/               # External integrations
+    └── parts_library.py       # Parts library scanning and insertion
+```
 
-#### SourceManager
+#### core/source.py (SourceManager)
 
 Maintains `source.py` alongside the FreeCAD document:
 
@@ -196,7 +218,7 @@ Key functions:
 
 #### Claude Code Integration
 
-`ClaudeCodeBackend` invokes the `claude` CLI with:
+`backends/claude_code.py` invokes the `claude` CLI with:
 - `--allowedTools Read,Glob,Grep,Edit` - Can read and edit source.py
 - `--output-format stream-json` - Streaming responses
 - Working directory set to project folder
